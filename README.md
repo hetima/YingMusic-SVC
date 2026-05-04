@@ -316,7 +316,8 @@ A: 训练 batch\_size=1 刚好（\~11GB），推理 100 步也安全。
 
 **Q: 可以用其他角色的数据训练吗？**
 A: 可以。替换 `train_data/` 下的音频文件，准备单条高质量 CAMPPlus 作为 `spk_embedding` 初始化即可。
-
+**Q： 数据集要求是什么？**
+A: 测试下来，其实5h的数据效果已经不错了，小于5h的还没试。建议微调后推理的参考音频用干净，清晰的。以及，微调可能没办法同时表现一个人的多个声线，可能还是得分开训练。
 ***
 
 ## 致谢
@@ -324,7 +325,7 @@ A: 可以。替换 `train_data/` 下的音频文件，准备单条高质量 CAMP
 - [GiantAILab/YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) — 基础架构和预训练权重
 - [Plachtaa/Seed-VC](https://github.com/Plachtaa/Seed-VC) — 上游架构和 OpenVoice 模块
 - [myshell-ai/OpenVoice](https://github.com/myshell-ai/OpenVoice) — 训练时音色扰动
-- 花丸晴琉 — 训练数据来源
+- 花丸晴琉 — 训练数据来源（花丸最可爱了！）
 
 ***
 
