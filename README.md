@@ -29,7 +29,7 @@
 > 🔗 HuggingFace 仓库：[321oll/hanamaru\_hareru\_YingMusicModel at main](https://huggingface.co/321oll/hanamaru_hareru_YingMusicModel/tree/main)
 >
 > 所有 YingMusic 模型推理时需要 `--target` 参考音频（花丸-平-voice.mp3），模型通过实时 CAMPPlus 提取音色。
-
+（貌似cosine和exp1的输出音量会偏小）
 还需下载 YingMusic 官方预训练权重作为训练起点：
 
 ```bash
