@@ -46,14 +46,14 @@
 #### **步骤**
 1. **伴奏分离**（推荐先做，提升鲁棒性）：
    ```cmd
-   cd E:\AIscene\AISVCs\YingMusic-SVC\accom_separation
+   cd YingMusic-SVC/accom_separation
    bash infer.sh   # 或 Windows 等价：python infer.py --input your_song.wav --output separated/
    ```
    - 会下载/使用 Band RoFormer 模型，输出 lead vocal。
 
 2. **CLI SVC 推理**：
    ```cmd
-   cd E:\AIscene\AISVCs\YingMusic-SVC
+   cd YingMusic-SVC
    bash my_infer.sh
    ```
    - 编辑 `my_infer.sh` 或 `my_inference.py` 调整路径、参数（source、target、output、steps、cfg 等）。
@@ -87,7 +87,7 @@
 
 ### 3. 自写训练方案（已实现，原作者未开源）
 
-> **原作者（GiantAILab）至今未开源训练代码**。以下训练脚本全部由我们自己编写，位于 `temp/temp_0502/` 目录下。
+> **原作者（GiantAILab）至今未开源训练代码**。以下训练脚本全部由我们自己编写，位于本仓库根目录下。
 
 #### 训练脚本清单
 
@@ -134,13 +134,14 @@
 #### 启动训练
 
 ```powershell
-cd E:\AIscene\AISVCs\temp\temp_0502
+cd YingMusic-SVC
 
 # SpkEmb 版（当前使用）
-..\..\YingMusic-SVC\.venv\Scripts\python.exe train_yingmusic_ft_spkemb.py `
-    --config ..\..\YingMusic-SVC\configs\YingMusic-SVC.yml `
-    --pretrained-ckpt ..\..\YingMusic-SVC\YingMusic-SVC-full.pt `
-    --dataset-dir ..\..\train_data `
+accelerate launch --config_file accelerate_config.yaml `
+    train_yingmusic_ft_spkemb.py `
+    --config configs/YingMusic-SVC.yml `
+    --pretrained-ckpt YingMusic-SVC-full.pt `
+    --dataset-dir train_data `
     --run-name yingmusic_spkemb_60k `
     --batch-size 1 `
     --max-steps 60000 `

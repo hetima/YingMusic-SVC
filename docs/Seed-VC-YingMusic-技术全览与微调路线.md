@@ -50,18 +50,20 @@
 
 ### 当前可用模型
 
-| 模型 | 路径 | 用途 |
+> 🔗 模型权重已上传至 HF：[321oll/hanamaru_hareru_YingMusicModel](https://huggingface.co/321oll/hanamaru_hareru_YingMusicModel)。以下路径为开发环境本地路径（仅参考）。
+
+| 模型 | 本地路径（开发环境） | 用途 |
 |------|------|------|
 | V1 lr=5e-6 15000步 | `runs/hanamaru_full_fav_step15000/ft_model.pth` | 唱歌+说话主力 |
 | V2 CFM-only | `runs/hanamaru_v2_cfm/CFM_epoch_00003_step_06000.pth` | V2 说话 CC FM |
-| YingMusic 预训练 | `YingMusic-SVC/YingMusic-SVC-full.pt` | 零样本推理 |
-| YingMusic exp1 12000步 | `temp/temp_0502/output_models/yingmusic_exp1/` | **★ 清新柔和派** |
-| YingMusic cosine 3000步 | `temp/temp_0502/output_models/yingmusic_cosine/` | **★ 最清新** |
-| **YingMusic spkemb 60k** | **`temp/temp_0502/output_models/yingmusic_spkemb_60k/`** | **存档（厚重风格）** |
-| **YingMusic v3 20k** | **`temp/temp_0502/output_models/spkemb_v3_lr3e-5_20k/`** | **✅ 音色最准** |
-| hanamaru_avg_style.pt | `temp/temp_0502/output_models/hanamaru_avg_style.pt` | ❌ 平均 CAMPPlus (已证无效) |
-| **hanamaru_prompt_style.pt** | **`temp/temp_0502/output_models/hanamaru_prompt_style.pt`** | **单条 CAMPPlus (v3 初始化)** |
-| OpenVoice se_db | `seed-vc/modules/openvoice/checkpoints_v2/converter/se_db.pt` | Timbre Shifter 依赖 (100004人) |
+| YingMusic 预训练 | `YingMusic-SVC-full.pt` (HF: GiantAILab) | 零样本推理 |
+| YingMusic exp1 12000步 | `output_models/yingmusic_exp1/` | **★ 清新柔和派** |
+| YingMusic cosine 3000步 | `output_models/yingmusic_cosine/` | **★ 最清新** |
+| **YingMusic spkemb 60k** | **`output_models/yingmusic_spkemb_60k/`** | **存档（厚重风格）** |
+| **YingMusic v3 20k** | **`output_models/spkemb_v3_lr3e-5_20k/`** | **✅ 音色最准** |
+| hanamaru_avg_style.pt | `output_models/hanamaru_avg_style.pt` | ❌ 平均 CAMPPlus (已证无效) |
+| **hanamaru_prompt_style.pt** | **`output_models/hanamaru_prompt_style.pt`** | **单条 CAMPPlus (v3 初始化)** |
+| OpenVoice se_db | `modules/openvoice/checkpoints_v2/converter/se_db.pt` | Timbre Shifter 依赖 (100004人) |
 
 ---
 
@@ -157,11 +159,11 @@ style = spk_emb(torch.zeros(1, dtype=torch.long, device=device))
 ### 推理命令 (无 target 音频)
 
 ```powershell
-cd E:\AIscene\AISVCs\temp\temp_0502
-..\..\.venv\Scripts\python.exe inference_spkemb.py `
+cd YingMusic-SVC
+python inference_spkemb.py `
     --source <任意音频> `
-    --checkpoint output_models\yingmusic_spkemb_60k\ft_model.pth `
-    --config "E:\AIscene\AISVCs\YingMusic-SVC\configs\YingMusic-SVC.yml" `
+    --checkpoint output_models/yingmusic_spkemb_60k/ft_model.pth `
+    --config configs/YingMusic-SVC.yml `
     --diffusion-steps 50
 ```
 
@@ -174,12 +176,11 @@ cd E:\AIscene\AISVCs\temp\temp_0502
 ### 运行命令
 
 ```powershell
-cd E:\AIscene\AISVCs\temp\temp_0502
-..\..\.venv\Scripts\python.exe -m accelerate.commands.launch `
-    --config_file accelerate_config.yaml `
+cd YingMusic-SVC
+accelerate launch --config_file accelerate_config.yaml `
     train_yingmusic_ft_spkemb.py `
-    --config "E:\AIscene\AISVCs\YingMusic-SVC\configs\YingMusic-SVC.yml" `
-    --pretrained-ckpt "E:\AIscene\AISVCs\YingMusic-SVC\YingMusic-SVC-full.pt" `
+    --config configs/YingMusic-SVC.yml `
+    --pretrained-ckpt YingMusic-SVC-full.pt `
     --dataset-dir train_data `
     --run-name yingmusic_spkemb_60k `
     --save-every 10000
@@ -219,62 +220,60 @@ cd E:\AIscene\AISVCs\temp\temp_0502
 
 ## 13. 关键文件清单
 
+> ⚠️ 以下路径是开发环境历史记录（`temp/temp_0502/` = 开发工作目录，`seed-vc/` = 上游项目）。本仓库已将核心文件整理到根目录和 `modules/` 下。
+
 ### 训练脚本
 
-| 文件 | 路径 | 作用 |
+| 文件 | 仓库位置 | 作用 |
 |------|------|------|
-| `train_yingmusic_ft_spkemb.py` | `temp/temp_0502/` | **当前 60k 训练脚本（含 spk_embedding）** |
-| `train_yingmusic_ft_cosine.py` | `temp/temp_0502/` | 3000 步 cosine 实验脚本 |
-| `train_yingmusic_ft.py` | `temp/temp_0502/` | 最初 lr=5e-6 实验脚本 |
-| V1 训练脚本 | `seed-vc/train.py` | V1 基线 |
-| V1 微调脚本 | `seed-vc/train_lr_5e-6.py` | V1 15000 步训练 |
+| `train_yingmusic_ft_spkemb.py` | 根目录 | **主训练脚本（含 spk_embedding）** |
+| `train_yingmusic_ft_cosine.py` | 根目录 | Cosine warmup 训练脚本 |
+| `train_yingmusic_ft.py` | 根目录 | 基础训练（lr=5e-6） |
+| `_train_spkemb_v2.py` | 根目录 | v2 训练脚本（环境变量注入） |
 
 ### 推理脚本
 
-| 文件 | 路径 | 作用 |
+| 文件 | 仓库位置 | 作用 |
 |------|------|------|
-| `inference_spkemb.py` | `temp/temp_0502/` | **无 target 推理（固化 spk_embedding）** |
-| `my_inference.py` | `YingMusic-SVC/` | YingMusic 官方推理（需 target） |
-| `inference.py` | `seed-vc/` | V1 推理 |
-| `inference_v2.py` | `seed-vc/` | V2 推理 |
+| `inference_spkemb.py` | 根目录 | **无 target 推理（固化 spk_embedding）** |
+| `my_inference.py` | 根目录 | YingMusic 官方推理（需 target） |
+| `inference.py` | 根目录 | Seed-VC V1 推理 |
 
 ### 数据工具
 
-| 文件 | 路径 | 作用 |
+| 文件 | 仓库位置 | 作用 |
 |------|------|------|
-| `batch_msst.ps1` | `cyanAIWorkAria/` | MSST 三阶段人声提取 |
-| `recut.py` | `temp/temp_0502/` | 干声切分 + silenceremove |
-| `extract_avg_campplus.py` | `temp/temp_0502/` | 提取平均 CAMPPlus (hanamaru_avg_style.pt) |
-| `smart_cut.py` | `seed-vc/` | 原始切分脚本 |
+| `recut.py` | 根目录 | 干声切分 + silenceremove |
+| `extract_avg_campplus.py` | 根目录 | 提取平均 CAMPPlus |
+| `clean_silence.py` | 根目录 | 静音处理 |
 
 ### 调度与配置
 
-| 文件 | 路径 | 作用 |
+| 文件 | 仓库位置 | 作用 |
 |------|------|------|
-| `optimizers_cosine.py` | `temp/temp_0502/` | CosineWarmupScheduler |
-| `lr_schedule_60k.html` | `temp/temp_0502/` | LR 曲线可视化 |
-| `accelerate_config.yaml` | `temp/temp_0502/` | accelerate 配置 |
-| `run_all.ps1` | `temp/temp_0502/` | 全自动 MSST→切分→训练 |
+| `optimizers_cosine.py` | 根目录 | CosineWarmupScheduler |
+| `optimizers.py` | 根目录 | 优化器构建 |
+| `accelerate_config.yaml` | 根目录 | accelerate 配置 |
 
 ### YingMusic 核心模块
 
-| 文件 | 路径 |
+| 文件 | 仓库位置 |
 |------|------|
-| `length_regulator.py` | `temp/temp_0502/modules/` (YingMusic版, 238行) |
-| `flow_matching.py` | `temp/temp_0502/modules/` (YingMusic版, 667行, 含能量均衡loss) |
-| `diffusion_transformer.py` | `temp/temp_0502/modules/` (YingMusic版, 564行, 含style_r通道) |
-| `YingMusic-SVC.yml` | `YingMusic-SVC/configs/` |
-| `YingMusic-SVC-full.pt` | `YingMusic-SVC/` |
+| `length_regulator.py` | `modules/` (YingMusic版, 238行) |
+| `flow_matching.py` | `modules/` (YingMusic版, 667行, 含能量均衡loss) |
+| `diffusion_transformer.py` | `modules/` (YingMusic版, 564行, 含style_r通道) |
+| `commons.py` | `modules/` (模型构建 + checkpoint 加载) |
+| `YingMusic-SVC.yml` | `configs/` |
 
 ### 训练产物
 
 | 路径 | 内容 |
 |------|------|
-| `temp/temp_0502/output_models/yingmusic_spkemb_60k/` | **当前训练输出** |
-| `temp/temp_0502/output_models/hanamaru_avg_style.pt` | 平均 CAMPPlus (192维) |
-| `temp/temp_0502/output_models/ref_mel2.pt` | 缓存参考 mel (推理用) |
-| `temp/temp_0502/output_models/ref_S_ori.pt` | 缓存参考语义 (推理用) |
-| `temp/temp_0502/inference_results/comparison/` | 三家对比音频 |
+| `output_models/yingmusic_spkemb_60k/` | spkemb 60k 训练输出 |
+| `output_models/spkemb_v3_lr3e-5_20k/` | v3 20k 训练输出 |
+| `output_models/hanamaru_prompt_style.pt` | 单条 CAMPPlus (192维, v3初始化) |
+| `output_models/ref_mel2.pt` | 缓存参考 mel (推理用) |
+| `output_models/ref_S_ori.pt` | 缓存参考语义 (推理用) |
 
 ### 2.1 总览：数据流
 
@@ -523,18 +522,18 @@ YingMusic 在 V1 上增量:
 
 | 方案 | 跨说话人 | 花丸相似度 | 工作量 |
 |------|:---:|:---:|:--:|
-| 用 OpenVoice 顶替 RVC | ✅ | 稍弱 | ✅ 已实现（`temp/temp_0502/`） |
+| 用 OpenVoice 顶替 RVC | ✅ | 稍弱 | ✅ 已实现（本仓库根目录） |
 | 跳过 shifter | ❌ | 强 | 小 |
 | 自己训 RVC shifter | ✅ | ✅ | 巨大 |
 
 ### 7.3 结论：已用 OpenVoice 替代
 
-- `se_db.pt`（100004 人 embedding）已在本地
+- `se_db.pt`（100004 人 embedding）需从 OpenVoice 下载（未包含在仓库中）
 - 自写训练代码中已实现 OpenVoice ToneColorConverter + se_db 随机采样替代 RVC shifter
 - 100004 人的覆盖度 >> 120 人，跨说话人泛化更好
 - 代价是 singing-specific 质量稍降（高频/颤音保留不如 RVC 专训版）
 - Timbre shifter 不在模型内部，替换不影响 checkpoint 加载
-- 训练代码路径：`temp/temp_0502/train_yingmusic_ft_spkemb.py`（当前主力版本）
+- 训练代码路径：`train_yingmusic_ft_spkemb.py`（仓库根目录）
 
 ---
 
@@ -722,23 +721,17 @@ cosine(3k)  exp1(12k)  v3(20k)  spkemb(60k)
 
 ### 8.4 相关文件清单
 
-| 文件 | 位置 |
+| 文件 | 仓库位置 |
 |------|------|
-| V1 训练脚本 | `seed-vc/train.py` |
-| V1 微调脚本 (lr=5e-6) | `seed-vc/train_lr_5e-6.py` |
-| V2 训练脚本 | `seed-vc/train_v2.py` |
-| V1 推理脚本 | `seed-vc/inference.py` |
-| V2 推理脚本 | `seed-vc/inference_v2.py` |
-| YingMusic 推理脚本 | `YingMusic-SVC/my_inference.py` |
-| YingMusic 模型配置 | `YingMusic-SVC/configs/YingMusic-SVC.yml` |
-| YingMusic checkpoint | `YingMusic-SVC/YingMusic-SVC-full.pt` |
-| YingMusic length_regulator | `YingMusic-SVC/modules/length_regulator.py` |
-| YingMusic flow_matching | `YingMusic-SVC/modules/flow_matching.py` |
-| OpenVoice se_db | `seed-vc/modules/openvoice/checkpoints_v2/converter/se_db.pt` |
-| V1 DiT | `seed-vc/modules/diffusion_transformer.py` |
-| YingMusic DiT | `YingMusic-SVC/modules/diffusion_transformer.py` |
-| **自写训练脚本** | **`temp/temp_0502/train_yingmusic_ft_spkemb.py`** |
-| **自写推理脚本** | **`temp/temp_0502/inference_spkemb.py`** |
+| YingMusic 推理脚本 | `my_inference.py`（根目录） |
+| YingMusic 模型配置 | `configs/YingMusic-SVC.yml` |
+| YingMusic checkpoint | `YingMusic-SVC-full.pt` (HF: GiantAILab) |
+| YingMusic length_regulator | `modules/length_regulator.py` |
+| YingMusic flow_matching | `modules/flow_matching.py` |
+| YingMusic DiT | `modules/diffusion_transformer.py` |
+| OpenVoice se_db | `modules/openvoice/checkpoints_v2/converter/se_db.pt` |
+| **自写训练脚本** | **`train_yingmusic_ft_spkemb.py`（根目录）** |
+| **自写推理脚本** | **`inference_spkemb.py`（根目录）** |
 
 ---
 

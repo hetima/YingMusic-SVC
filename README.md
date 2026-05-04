@@ -248,44 +248,55 @@ cos=1.0       cos=0.9997      cos=0.996       cos≈0.90
 
 ## 文件结构
 
+本仓库是 [GiantAILab/YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) 的 fork，**新增了完整的微调训练支持**。以下是带标注的完整目录：
+
 ```
-YingMusic_howToFineTune/
-├── configs/
-│   ├── YingMusic-SVC.yml            # YingMusic 模型配置
-│   └── my_finetune_12g.yml          # Seed-VC V1 微调配平
+YingMusic-SVC/                        # fork 自 GiantAILab/YingMusic-SVC
+│
+│  ── 原仓库文件（保留） ──
+├── my_inference.py                   # ★ 官方推理（CAMPPlus 实时）
+├── my_infer.sh                       # 官方推理快捷脚本
+├── gradio_app.py                     # Gradio WebUI
+├── mm4.py                            # 音频预处理
+├── hf_utils.py                       # HuggingFace 模型下载
+├── requirements.txt                  # 原仓库依赖
+├── Remix/                            # 混响/回声后处理
+├── accom_separation/                 # 伴奏分离（Band RoFormer）
+├── utils/                            # 日志工具
+│
+│  ── 新增：训练代码 ──
+├── train_yingmusic_ft_spkemb.py      # ★ 主训练脚本（spk_embedding 方案）
+├── _train_spkemb_v2.py               # v2 训练脚本（环境变量注入 lr/init）
+├── train_yingmusic_ft.py             # 基础训练（lr=5e-6）
+├── train_yingmusic_ft_cosine.py      # Cosine 训练（lr=1e-4 warmup）
+├── optimizers.py                     # 优化器构建
+├── optimizers_cosine.py              # CosineWarmupScheduler
+├── accelerate_config.yaml            # accelerate 分布式配置
 ├── data/
-│   └── ft_dataset.py                # 训练数据加载器
+│   └── ft_dataset.py                 # 训练数据加载器
+│
+│  ── 新增：推理 + 模块 ──
+├── inference_spkemb.py               # 无 target 推理（spk_embedding 查表）
+├── inference.py                      # Seed-VC V1 推理（附加，非 YingMusic 原生）
+├── modules/openvoice/                # OpenVoice 音色扰动（训练用，仅 py）
+├── 花丸-平-voice.mp3                 # 花丸参考音频
+│
+│  ── 新增：文档 + 工具 ──
 ├── docs/
 │   ├── Seed-VC-YingMusic-技术全览与微调路线.md
-│   ├── 对Yingmusic微调的补充.md       # 训练历史 + 四模型矩阵对比
-│   ├── 模型对比与最终选型.md           # 三模型评分 + 选型速查
-│   └── 微调教程.md
-├── modules/                         # YingMusic 定制模块
-│   ├── commons.py                   # 模型构建 + checkpoint 加载（已改）
-│   ├── flow_matching.py             # CFM 流匹配（含 balance_loss）
-│   ├── length_regulator.py          # 长度调节器（含 style_residual）
-│   ├── diffusion_transformer.py     # DiT（含 style_r 通道）
-│   ├── campplus/                    # CAMPPlus 说话人验证
-│   ├── bigvgan/                     # BigVGAN 声码器
-│   ├── openvoice/                   # OpenVoice 音色扰动（仅 py）
-│   └── ...                          # 音频/F0/EnCodec 等
-├── train_yingmusic_ft_spkemb.py     # ★ 主训练脚本（spk_embedding）
-├── _train_spkemb_v2.py              # v2 训练脚本（环境变量注入）
-├── train_yingmusic_ft.py            # 基础训练（lr=5e-6）
-├── train_yingmusic_ft_cosine.py     # Cosine 训练（lr=1e-4）
-├── optimizers.py                    # 优化器构建
-├── optimizers_cosine.py             # CosineWarmupScheduler
-├── accelerate_config.yaml           # accelerate 分布式配置
-├── inference_spkemb.py              # ★ 无 target 推理（spk_embedding）
-├── my_inference.py                  # ★ 官方推理（CAMPPlus 实时）
-├── inference.py                     # Seed-VC V1 推理
-├── hf_utils.py                      # HuggingFace 模型下载
-├── recut.py                         # 干声切分工具
-├── extract_avg_campplus.py         # CAMPPlus 均值提取
-├── _check_v3_weights.py            # 权重偏移检测
-├── batch_matrix_infer.py           # 批量矩阵推理
-└── clean_silence.py                 # 静音处理
+│   ├── 对Yingmusic微调的补充.md        # 训练历史 + 四模型矩阵对比
+│   └── 模型对比与最终选型.md            # 三模型评分 + 选型速查
+├── configs/
+│   └── my_finetune_12g.yml           # Seed-VC V1 微调配平（YingMusic-SVC.yml 原已存在）
+├── recut.py                          # 干声切分工具
+├── extract_avg_campplus.py           # CAMPPlus 均值提取
+├── _check_v3_weights.py              # 权重偏移检测
+├── batch_matrix_infer.py             # 批量矩阵推理
+├── clean_silence.py                  # 静音处理
+└── .gitignore                        # 排除权重/数据/缓存
 ```
+
+> ℹ️ 根目录有两个 `inference.py`：`inference.py`（我们加的 Seed-VC V1 推理）和 `accom_separation/inference.py`（原仓库的伴奏分离推理），互不冲突。
 
 ***
 
