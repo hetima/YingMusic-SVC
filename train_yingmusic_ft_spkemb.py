@@ -1,0 +1,432 @@
+import os
+import sys
+os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
+import torch
+import torch.nn as nn
+import torch.multiprocessing as mp
+import random
+import librosa
+import yaml
+import argparse
+import torchaudio
+import torchaudio.compliance.kaldi as kaldi
+import glob
+from tqdm import tqdm
+import shutil
+
+from modules.commons import recursive_munch, build_model, load_checkpoint
+from optimizers_cosine import build_optimizer
+from data.ft_dataset import build_ft_dataloader
+from hf_utils import load_custom_model_from_hf
+
+
+AVG_STYLE_PATH = "output_models/hanamaru_avg_style.pt"
+
+
+class Trainer:
+    def __init__(self,
+                 config_path,
+                 pretrained_ckpt_path,
+                 data_dir,
+                 run_name,
+                 batch_size=0,
+                 num_workers=0,
+                 steps=1000,
+                 save_interval=500,
+                 max_epochs=1000,
+                 device="cuda:0",
+                 ):
+        self.device = device
+        config = yaml.safe_load(open(config_path))
+        self.log_dir = os.path.join("output_models", run_name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        shutil.copyfile(config_path, os.path.join(self.log_dir, os.path.basename(config_path)))
+        batch_size = config.get('batch_size', 10) if batch_size == 0 else batch_size
+        self.max_steps = steps
+
+        self.n_epochs = max_epochs
+        self.log_interval = config.get('log_interval', 10)
+        self.save_interval = save_interval
+
+        self.sr = config['preprocess_params'].get('sr', 22050)
+        self.hop_length = config['preprocess_params']['spect_params'].get('hop_length', 256)
+        self.win_length = config['preprocess_params']['spect_params'].get('win_length', 1024)
+        self.n_fft = config['preprocess_params']['spect_params'].get('n_fft', 1024)
+        preprocess_params = config['preprocess_params']
+
+        self.train_dataloader = build_ft_dataloader(
+            data_dir,
+            preprocess_params['spect_params'],
+            self.sr,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
+        self.f0_condition = config['model_params']['DiT'].get('f0_condition', False)
+        self.build_f0_fn(device, config)
+        self.build_converter(device, config)
+        self.build_semantic_fn(device, config)
+        self.build_vocoder(device, config)
+
+        scheduler_params = {
+            "warmup_steps": 3000,
+            "base_lr": 1e-4,
+        }
+
+        self.model_params = recursive_munch(config['model_params'])
+        self.model = build_model(self.model_params, stage='DiT')
+
+        _ = [self.model[key].to(device) for key in self.model]
+        self.model.cfm.estimator.setup_caches(max_batch_size=batch_size, max_seq_length=8192)
+
+        self.optimizer = build_optimizer({key: self.model[key] for key in self.model},
+                                         lr=float(scheduler_params['base_lr']),
+                                         warmup_steps=3000,
+                                         total_steps=self.max_steps,
+                                         lr_min=1e-6)
+
+        self.spk_embedding = nn.Embedding(1, 192)
+        if os.path.exists(AVG_STYLE_PATH):
+            avg = torch.load(AVG_STYLE_PATH, map_location='cpu')
+            self.spk_embedding.weight.data.copy_(avg.unsqueeze(0))
+            print(f"Initialized spk_embedding from {AVG_STYLE_PATH}")
+        else:
+            print(f"WARNING: {AVG_STYLE_PATH} not found, spk_embedding starts from random")
+        self.spk_embedding.to(device)
+
+        if pretrained_ckpt_path is None:
+            available_checkpoints = glob.glob(os.path.join(self.log_dir, "DiT_epoch_*_step_*.pth"))
+            if len(available_checkpoints) > 0:
+                latest_checkpoint = max(
+                    available_checkpoints, key=lambda x: int(x.split("_")[-1].split(".")[0])
+                )
+            elif config.get('pretrained_model', ''):
+                latest_checkpoint = load_custom_model_from_hf("Plachta/Seed-VC", config['pretrained_model'], None)
+            else:
+                latest_checkpoint = ""
+        else:
+            assert os.path.exists(pretrained_ckpt_path), f"Pretrained checkpoint {pretrained_ckpt_path} not found"
+            latest_checkpoint = pretrained_ckpt_path
+
+        if os.path.exists(latest_checkpoint):
+            load_only = pretrained_ckpt_path is not None
+            self.model, self.optimizer, self.epoch, self.iters = load_checkpoint(
+                self.model, self.optimizer, latest_checkpoint,
+                load_only_params=load_only,
+                ignore_modules=[],
+                is_distributed=False
+            )
+            state = torch.load(latest_checkpoint, map_location='cpu')
+            if 'spk_embedding' in state:
+                self.spk_embedding.load_state_dict(state['spk_embedding'])
+                print(f"Loaded spk_embedding from {latest_checkpoint}")
+            print(f"Loaded checkpoint from {latest_checkpoint}")
+        else:
+            self.epoch, self.iters = 0, 0
+            print("Failed to load any checkpoint, training from scratch.")
+
+    def build_f0_fn(self, device, config):
+        from modules.rmvpe import RMVPE
+        model_path = load_custom_model_from_hf("lj1995/VoiceConversionWebUI", "rmvpe.pt", None)
+        self.rmvpe = RMVPE(model_path, is_half=False, device=device)
+        self.f0_fn = self.rmvpe
+
+    def build_converter(self, device, config):
+        from modules.openvoice.api import ToneColorConverter
+        converter_dir = os.path.join(os.path.dirname(__file__), "modules", "openvoice", "checkpoints_v2", "converter")
+        ckpt_converter = os.path.join(converter_dir, "checkpoint.pth")
+        config_converter = os.path.join(converter_dir, "config.json")
+        self.tone_color_converter = ToneColorConverter(config_converter, device=device)
+        self.tone_color_converter.load_ckpt(ckpt_converter)
+        self.tone_color_converter.model.eval()
+        se_db_path = os.path.join(converter_dir, "se_db.pt")
+        self.se_db = torch.load(se_db_path, map_location='cpu')
+
+    def build_vocoder(self, device, config):
+        vocoder_type = config['model_params']['vocoder']['type']
+        vocoder_name = config['model_params']['vocoder'].get('name', None)
+        if vocoder_type == 'bigvgan':
+            from modules.bigvgan import bigvgan
+            self.bigvgan_model = bigvgan.BigVGAN.from_pretrained(vocoder_name, use_cuda_kernel=False)
+            self.bigvgan_model.remove_weight_norm()
+            self.bigvgan_model = self.bigvgan_model.eval().to(device)
+            vocoder_fn = self.bigvgan_model
+        elif vocoder_type == 'hifigan':
+            from modules.hifigan.generator import HiFTGenerator
+            from modules.hifigan.f0_predictor import ConvRNNF0Predictor
+            hift_config = yaml.safe_load(open('configs/hifigan.yml', 'r'))
+            hift_path = load_custom_model_from_hf("FunAudioLLM/CosyVoice-300M", 'hift.pt', None)
+            self.hift_gen = HiFTGenerator(**hift_config['hift'],
+                                          f0_predictor=ConvRNNF0Predictor(**hift_config['f0_predictor']))
+            self.hift_gen.load_state_dict(torch.load(hift_path, map_location='cpu'))
+            self.hift_gen.eval()
+            self.hift_gen.to(device)
+            vocoder_fn = self.hift_gen
+        else:
+            raise ValueError(f"Unsupported vocoder type: {vocoder_type}")
+        self.vocoder_fn = vocoder_fn
+
+    def build_semantic_fn(self, device, config):
+        speech_tokenizer_type = config['model_params']['speech_tokenizer'].get('type', 'cosyvoice')
+        if speech_tokenizer_type == 'whisper':
+            from transformers import AutoFeatureExtractor, WhisperModel
+            whisper_model_name = config['model_params']['speech_tokenizer']['name']
+            self.whisper_model = WhisperModel.from_pretrained(whisper_model_name).to(device)
+            self.whisper_feature_extractor = AutoFeatureExtractor.from_pretrained(whisper_model_name)
+            del self.whisper_model.decoder
+
+            def semantic_fn(waves_16k):
+                ori_inputs = self.whisper_feature_extractor(
+                    [w16k.cpu().numpy() for w16k in waves_16k],
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                    sampling_rate=16000,
+                )
+                ori_input_features = self.whisper_model._mask_input_features(
+                    ori_inputs.input_features, attention_mask=ori_inputs.attention_mask
+                ).to(device)
+                with torch.no_grad():
+                    ori_outputs = self.whisper_model.encoder(
+                        ori_input_features.to(self.whisper_model.encoder.dtype),
+                        head_mask=None,
+                        output_attentions=False,
+                        output_hidden_states=False,
+                        return_dict=True,
+                    )
+                S_ori = ori_outputs.last_hidden_state.to(torch.float32)
+                S_ori = S_ori[:, :waves_16k.size(-1) // 320 + 1]
+                return S_ori
+
+        elif speech_tokenizer_type == 'xlsr':
+            from transformers import (
+                Wav2Vec2FeatureExtractor,
+                Wav2Vec2Model,
+            )
+            model_name = config['model_params']['speech_tokenizer']['name']
+            output_layer = config['model_params']['speech_tokenizer']['output_layer']
+            self.wav2vec_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+            self.wav2vec_model = Wav2Vec2Model.from_pretrained(model_name)
+            self.wav2vec_model.encoder.layers = self.wav2vec_model.encoder.layers[:output_layer]
+            self.wav2vec_model = self.wav2vec_model.to(device)
+            self.wav2vec_model = self.wav2vec_model.eval()
+            self.wav2vec_model = self.wav2vec_model.half()
+
+            def semantic_fn(waves_16k):
+                ori_waves_16k_input_list = [waves_16k[bib].cpu().numpy() for bib in range(len(waves_16k))]
+                ori_inputs = self.wav2vec_feature_extractor(
+                    ori_waves_16k_input_list,
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                    padding=True,
+                    sampling_rate=16000
+                ).to(device)
+                with torch.no_grad():
+                    ori_outputs = self.wav2vec_model(
+                        ori_inputs.input_values.half(),
+                    )
+                S_ori = ori_outputs.last_hidden_state.float()
+                return S_ori
+        else:
+            raise ValueError(f"Unsupported speech tokenizer type: {speech_tokenizer_type}")
+        self.semantic_fn = semantic_fn
+
+    def train_one_step(self, batch):
+        waves, mels, wave_lengths, mel_input_length = batch
+
+        B = waves.size(0)
+        target_size = mels.size(2)
+        target = mels
+        target_lengths = mel_input_length
+
+        # get speaker embedding
+        if self.sr != 22050:
+            waves_22k = torchaudio.functional.resample(waves, self.sr, 22050)
+            wave_lengths_22k = (wave_lengths.float() * 22050 / self.sr).long()
+        else:
+            waves_22k = waves
+            wave_lengths_22k = wave_lengths
+        se_batch = self.tone_color_converter.extract_se(waves_22k, wave_lengths_22k)
+
+        ref_se_idx = torch.randint(0, len(self.se_db), (B,))
+        ref_se = self.se_db[ref_se_idx].to(self.device)
+
+        # convert
+        converted_waves_22k = self.tone_color_converter.convert(
+            waves_22k, wave_lengths_22k, se_batch, ref_se
+        ).squeeze(1)
+
+        if self.sr != 22050:
+            converted_waves = torchaudio.functional.resample(converted_waves_22k, 22050, self.sr)
+        else:
+            converted_waves = converted_waves_22k
+
+        waves_16k = torchaudio.functional.resample(waves, self.sr, 16000)
+        wave_lengths_16k = (wave_lengths.float() * 16000 / self.sr).long()
+        converted_waves_16k = torchaudio.functional.resample(converted_waves, self.sr, 16000)
+
+        # extract S_alt (perturbed speech tokens)
+        S_ori = self.semantic_fn(waves_16k)
+        S_alt = self.semantic_fn(converted_waves_16k)
+
+        if self.f0_condition:
+            F0_ori = self.rmvpe.infer_from_audio_batch(waves_16k)
+        else:
+            F0_ori = None
+
+        # use learnable speaker embedding instead of CAMPPlus
+        y = self.spk_embedding(torch.zeros(B, dtype=torch.long, device=self.device))
+
+        # YingMusic length_regulator: pass style to get style_residual
+        alt_cond, _, alt_codes, alt_commitment_loss, alt_codebook_loss, alt_style_r = (
+            self.model.length_regulator(S_alt, ylens=target_lengths, f0=F0_ori, style=y, return_style_residual=True)
+        )
+        ori_cond, _, ori_codes, ori_commitment_loss, ori_codebook_loss, ori_style_r = (
+            self.model.length_regulator(S_ori, ylens=target_lengths, f0=F0_ori, style=y, return_style_residual=True)
+        )
+        if alt_commitment_loss is None:
+            alt_commitment_loss = 0
+            alt_codebook_loss = 0
+            ori_commitment_loss = 0
+            ori_codebook_loss = 0
+            alt_style_r = None
+            ori_style_r = None
+
+        # randomly set a length as prompt
+        prompt_len_max = target_lengths - 1
+        prompt_len = (torch.rand([B], device=alt_cond.device) * prompt_len_max).floor().long()
+        prompt_len[torch.rand([B], device=alt_cond.device) < 0.1] = 0
+
+        # for prompt cond token, use ori_cond instead of alt_cond
+        cond = alt_cond.clone()
+        for bib in range(B):
+            cond[bib, :prompt_len[bib]] = ori_cond[bib, :prompt_len[bib]]
+
+        # mix style_r (same logic: prompt region uses ori_style_r)
+        style_r = None
+        if alt_style_r is not None and ori_style_r is not None:
+            style_r = alt_style_r.clone()
+            for bib in range(B):
+                style_r[bib, :prompt_len[bib]] = ori_style_r[bib, :prompt_len[bib]]
+
+        # diffusion target
+        common_min_len = min(target_size, cond.size(1))
+        target = target[:, :, :common_min_len]
+        cond = cond[:, :common_min_len]
+        target_lengths = torch.clamp(target_lengths, max=common_min_len)
+        x = target
+
+        # YingMusic CFM: balance_loss=True enables energy-balanced loss
+        loss, _ = self.model.cfm(x, target_lengths, prompt_len, cond, y,
+                                  style_r=style_r, balance_loss=True)
+
+        loss_total = (
+            loss +
+            (alt_commitment_loss + ori_commitment_loss) * 0.05 +
+            (ori_codebook_loss + alt_codebook_loss) * 0.15
+        )
+
+        self.optimizer.zero_grad()
+        loss_total.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.cfm.parameters(), 10.0)
+        torch.nn.utils.clip_grad_norm_(self.model.length_regulator.parameters(), 10.0)
+        torch.nn.utils.clip_grad_norm_(self.spk_embedding.parameters(), 10.0)
+        self.optimizer.step('cfm')
+        self.optimizer.step('length_regulator')
+        self.optimizer.scheduler(key='cfm')
+        self.optimizer.scheduler(key='length_regulator')
+
+        return loss.detach().item()
+
+    def train_one_epoch(self):
+        _ = [self.model[key].train() for key in self.model]
+        for i, batch in enumerate(tqdm(self.train_dataloader)):
+            batch = [b.to(self.device) for b in batch]
+            loss = self.train_one_step(batch)
+            self.ema_loss = (
+                self.ema_loss * self.loss_smoothing_rate + loss * (1 - self.loss_smoothing_rate)
+                if self.iters > 0 else loss
+            )
+            if self.iters % self.log_interval == 0:
+                print(f"epoch {self.epoch}, step {self.iters}, loss: {self.ema_loss}")
+            self.iters += 1
+
+            if self.iters >= self.max_steps:
+                break
+
+            if self.iters % self.save_interval == 0:
+                print('Saving..')
+                state = {
+                    'net': {key: self.model[key].state_dict() for key in self.model},
+                    'optimizer': self.optimizer.state_dict(),
+                    'scheduler': self.optimizer.scheduler_state_dict(),
+                    'spk_embedding': self.spk_embedding.state_dict(),
+                    'iters': self.iters,
+                    'epoch': self.epoch,
+                }
+                save_path = os.path.join(
+                    self.log_dir,
+                    f'DiT_epoch_{self.epoch:05d}_step_{self.iters:05d}.pth'
+                )
+                torch.save(state, save_path)
+
+    def train(self):
+        self.ema_loss = 0
+        self.loss_smoothing_rate = 0.99
+        for epoch in range(self.n_epochs):
+            self.epoch = epoch
+            self.train_one_epoch()
+            if self.iters >= self.max_steps:
+                break
+
+        print('Saving final model..')
+        state = {
+            'net': {key: self.model[key].state_dict() for key in self.model},
+            'spk_embedding': self.spk_embedding.state_dict(),
+        }
+        os.makedirs(self.log_dir, exist_ok=True)
+        save_path = os.path.join(self.log_dir, 'ft_model.pth')
+        torch.save(state, save_path)
+        print(f"Final model saved at {save_path}")
+
+
+def main(args):
+    trainer = Trainer(
+        config_path=args.config,
+        pretrained_ckpt_path=args.pretrained_ckpt,
+        data_dir=args.dataset_dir,
+        run_name=args.run_name,
+        batch_size=args.batch_size,
+        steps=args.max_steps,
+        max_epochs=args.max_epochs,
+        save_interval=args.save_every,
+        num_workers=args.num_workers,
+        device=args.device
+    )
+    trainer.train()
+
+
+if __name__ == '__main__':
+    if sys.platform == 'win32':
+        mp.freeze_support()
+        mp.set_start_method('spawn', force=True)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, required=True,
+                        help='Path to YingMusic-SVC.yml config')
+    parser.add_argument('--pretrained-ckpt', type=str, default=None,
+                        help='Path to YingMusic-SVC-full.pt checkpoint')
+    parser.add_argument('--dataset-dir', type=str, required=True,
+                        help='Path to training data (e.g. train_data/)')
+    parser.add_argument('--run-name', type=str, default='yingmusic_ft',
+                        help='Experiment name, output saved to output_models/<name>/')
+    parser.add_argument('--batch-size', type=int, default=1)
+    parser.add_argument('--max-steps', type=int, default=60000)
+    parser.add_argument('--max-epochs', type=int, default=20)
+    parser.add_argument('--save-every', type=int, default=10000)
+    parser.add_argument('--num-workers', type=int, default=0)
+    parser.add_argument("--gpu", type=int, help="Which GPU id to use", default=0)
+    args = parser.parse_args()
+    if torch.backends.mps.is_available():
+        args.device = "mps"
+    else:
+        args.device = f"cuda:{args.gpu}" if args.gpu else "cuda:0"
+    main(args)

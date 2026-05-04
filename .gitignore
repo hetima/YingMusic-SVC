@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+
+# Model weights (download from HF)
+*.pth
+*.pt
+!output_models/
+output_models/*.pth
+
+# Checkpoints cache
+checkpoints/
+checkpoints_v2/
+
+# Training data
+train_data/
+
+# Output files
+outputs/
+inference_results/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MSST temp
+msst_temp/
