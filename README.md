@@ -8,9 +8,9 @@
 
 ## 项目背景
 
-[YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) 是 GiantAILab 于 2025 年底开源的零样本歌声转换项目，基于 Seed-VC 架构扩展，增加了能量均衡 loss、style\_residual 等创新。**但原作者至今（2026-05）未开源训练代码**，官方仓库仅支持 inference。
+[YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) 是 GiantAILab 于 2025 年底开源的零样本歌声转换项目，基于 Seed-VC 架构扩展，增加了能量均衡 loss、style\_residual 等创新。但原作者至今（2026-05）未开源训练代码，官方仓库仅支持 inference。
 
-本项目**从零编写了完整的微调训练管线**，经过三轮实验迭代，产出 4 个可供使用的花丸音色模型（各有风格侧重），覆盖从"清新轻快"到"厚重准确"的完整风格谱系。
+本项目编写了完整的微调训练管线，产出 4 个可供使用的花丸音色模型（各有风格侧重）
 
 ***
 
@@ -89,7 +89,7 @@ python my_inference.py \
 
 ### 2. inference\_spkemb.py（无 target — spk\_embedding 查表）
 
-我们的自写推理脚本，音色固化在模型权重内，**不需要传 target**。
+我自写的推理脚本，音色固化在模型权重内，**不需要传 target**。
 
 > ⚠️ 实测效果不如 CAMPPlus 实时（my\_inference.py），即使 spk\_embedding cos=1.000。推荐优先使用 my\_inference.py。
 
