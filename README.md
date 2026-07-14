@@ -15,6 +15,9 @@ uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url 
 uv pip install -r requirements.txt
 ```
 
+ファインチューニングする場合は[checkpoints_v2.zip](https://github.com/hetima/YingMusic-SVC/releases/download/20260714/checkpoints_v2.zip)をダウンロード、解凍し、`YingMusic-SVC/modules/openvoice/checkpoints_v2`と配置してください（あるいは任意の場所に置いて`YingMusic-SVC.yml`の記述を合わせる）。
+
+
 ---
 
 --- YingMusic-SVC README 日本語訳 ---
