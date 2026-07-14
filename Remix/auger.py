@@ -1,12 +1,12 @@
 import torch
 import torchaudio
-from torchaudio import sox_effects
 from typing import List, Optional, Tuple
 import librosa
 import numpy as np
 import math
 import torch.nn.functional as F
 import soundfile as sf
+from pedalboard import Delay, Reverb
 from pathlib import Path
 
 def ensure_2d(wave):
@@ -61,29 +61,27 @@ EFFECT_PARAMS = {
 }
 
 @torch.no_grad()
-def _apply_sox_effects_cpu(wave: torch.Tensor, sr: int, eff):
+def _apply_pedalboard_effect(wave: torch.Tensor, sr: int, effect):
     """
-    确保 SoX 在 CPU/float32 上跑，并把结果搬回 wave 的 device/dtype。
+    确保 pedalboard 在 CPU/float32 上运行，并把结果搬回原 device/dtype。
     wave: [T] 或 [C,T]
-    eff:  SoX effects 列表
     """
     wave2d = ensure_2d(wave)
     ref_device, ref_dtype = wave2d.device, wave2d.dtype
-    w_cpu = wave2d.to("cpu", dtype=torch.float32, non_blocking=False).contiguous()
-    y_cpu, _ = sox_effects.apply_effects_tensor(w_cpu, sr, eff)  # SoX 要求 CPU,float32
-    y = y_cpu.to(device=ref_device, dtype=ref_dtype)
+    w_cpu = wave2d.to("cpu", dtype=torch.float32, non_blocking=False).contiguous().numpy()
+    y_cpu = effect.process(w_cpu, sample_rate=sr)
+    y = torch.from_numpy(np.asarray(y_cpu)).to(device=ref_device, dtype=ref_dtype)
     return y
 
 def apply_echo(wave, sr, delay_ms=150.0, feedback=0.4, wet=0.35):
     wave = ensure_2d(wave)
     original_length = wave.shape[1]
-    try:
-        eff = [["echo", "0.8", "0.9", str(int(delay_ms)), str(feedback)]]
-        y = _apply_sox_effects_cpu(wave, sr, eff)
-    except RuntimeError as e:
-        print(f"Echo参数错误，使用简化版本: {e}")
-        eff = [["echo", "0.8", "0.9", str(int(delay_ms)), "0.3"]]
-        y = _apply_sox_effects_cpu(wave, sr, eff)
+    effect = Delay(
+        delay_seconds=max(0.0, float(delay_ms)) / 1000.0,
+        feedback=float(np.clip(feedback, 0.0, 1.0)),
+        mix=1.0,
+    )
+    y = _apply_pedalboard_effect(wave, sr, effect)
     y = align_length(y, original_length)
     y = (1 - wet) * wave + wet * y
     return safe_normalize(y)
@@ -94,22 +92,19 @@ def apply_reverb(wave, sr, reverberance=80, hf_damping=40, room_scale=120,
                 stereo_depth=100, pre_delay_ms=25, wet=0.5):
     wave = ensure_2d(wave)
     original_length = wave.shape[1]
-    try:
-        eff = [["reverb", str(reverberance), str(hf_damping), str(room_scale),
-               str(stereo_depth), str(pre_delay_ms)]]
-        y = _apply_sox_effects_cpu(wave, sr, eff)
-    except RuntimeError:
-        try:
-            eff = [["reverb", str(reverberance), str(hf_damping), str(room_scale)]]
-            y = _apply_sox_effects_cpu(wave, sr, eff)
-        except RuntimeError:
-            try:
-                eff = [["reverb", str(reverberance)]]
-                y = _apply_sox_effects_cpu(wave, sr, eff)
-            except RuntimeError:
-                print("所有reverb参数格式都失败，使用默认参数")
-                eff = [["reverb"]]
-                y = _apply_sox_effects_cpu(wave, sr, eff)
+    effect = Reverb(
+        room_size=float(np.clip(room_scale, 0.0, 100.0)) / 100.0,
+        damping=float(np.clip(hf_damping, 0.0, 100.0)) / 100.0,
+        wet_level=1.0,
+        dry_level=0.0,
+        width=float(np.clip(stereo_depth, 0.0, 100.0)) / 100.0,
+    )
+    # pedalboard の Reverb には pre-delay がないため、入力を遅らせて近似する。
+    pre_delay_samples = max(0, int(float(pre_delay_ms) * sr / 1000.0))
+    effect_wave = wave
+    if pre_delay_samples:
+        effect_wave = F.pad(effect_wave, (pre_delay_samples, 0))
+    y = _apply_pedalboard_effect(effect_wave, sr, effect)
     y = align_length(y, original_length)
     y = (1 - wet) * wave + wet * y
     return safe_normalize(y)
