@@ -7,7 +7,7 @@ accelerate
 # torchaudio==2.4.0
 scipy
 librosa
-huggingface-hub>=0.28.1
+huggingface-hub
 munch
 einops
 descript-audio-codec
@@ -31,3 +31,4 @@ ml_collections
 loralib
 beartype
 rotary_embedding_torch
+tqdm
