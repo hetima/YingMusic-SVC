@@ -4,9 +4,16 @@
 ↓
 [rabbit321011/YingMusic-SVC-fine-tune](https://github.com/rabbit321011/YingMusic-SVC-fine-tune) ファインチューニング対応frok
 ↓
-これ
+これ（とりあえずWindowsで動くようにした）
 
 
+## インストール
+
+お好みのtorchで
+```
+uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
+uv pip install -r requirements.txt
+```
 
 ---
 
