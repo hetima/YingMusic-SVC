@@ -1,9 +1,9 @@
 # YingMusic-SVC
 
-[GiantAILab/YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) オリジナル
-↓
-[rabbit321011/YingMusic-SVC-fine-tune](https://github.com/rabbit321011/YingMusic-SVC-fine-tune) ファインチューニング対応frok
-↓
+[GiantAILab/YingMusic-SVC](https://github.com/GiantAILab/YingMusic-SVC) オリジナル\
+↓\
+[rabbit321011/YingMusic-SVC-fine-tune](https://github.com/rabbit321011/YingMusic-SVC-fine-tune) ファインチューニング対応fork\
+↓\
 これ（とりあえずWindowsで動くようにした）
 
 
