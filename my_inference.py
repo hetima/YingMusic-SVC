@@ -17,6 +17,7 @@ import time
 from Remix.auger import echo_then_reverb_save
 import torchaudio
 import librosa
+import soundfile as sf
 from modules.commons import str2bool
 from mm4 import preprocess_voice_conversion
 from hf_utils import load_custom_model_from_hf
@@ -341,7 +342,7 @@ def run_inference(args, model_bundle, device=torch.device("cuda")):
     else:
         vc_name = f"{tgt_name}_{src_name}_{pitch_shift}.wav"
     output_path = os.path.join(exp_path, vc_name)
-    torchaudio.save(output_path, vc_wave.cpu(), sr)
+    sf.write(output_path, vc_wave[0].cpu().numpy(), sr)
     return output_path
 
 
