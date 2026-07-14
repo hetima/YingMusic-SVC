@@ -10,8 +10,7 @@ venv/
 # Model weights (download from HF)
 *.pth
 *.pt
-!output_models/
-output_models/*.pth
+output_models/
 
 # Checkpoints cache
 checkpoints/
