@@ -258,6 +258,8 @@ python my_inference.py \
 
 ### 2. inference_spkemb.py（target不要 — spk_embedding参照方式）
 
+（訳注：targetを使わず推論するのではなく、内部で`花丸-平-voice.mp3`をハードコートしているため指定不要という仕様です。また、フルパスで書かれているのでそのままでは動きません）
+
 自作の推論スクリプトです。音色がモデル重みに固定されているため、**targetの指定は不要**です。
 
 > ⚠️ 実測ではCAMPPlusリアルタイム方式（`my_inference.py`）より効果が劣ります。spk_embeddingのcosが1.000でも同様です。基本的には `my_inference.py` の使用を推奨します。
