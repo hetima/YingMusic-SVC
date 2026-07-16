@@ -500,9 +500,9 @@ def run_inference(args, model_bundle, device=torch.device("cuda")):
     src_name = os.path.basename(source).split(".")[0]
     tgt_name = os.path.basename(target_name).split(".")[0]
     if hasattr(args, "uuid"):
-        vc_name = f"{src_name}_{tgt_name}_" + args.uuid + ".wav"
+        vc_name = f"{src_name}_{tgt_name}_" + args.uuid + f".{args.format}"
     else:
-        vc_name = f"{tgt_name}_{src_name}_{pitch_shift}.wav"
+        vc_name = f"{src_name}_{tgt_name}.{args.format}"
     output_path = get_unique_output_path(os.path.join(output_dir, vc_name))
     sf.write(output_path, vc_wave[0].cpu().numpy(), sr)
     return output_path
@@ -513,9 +513,11 @@ if __name__ == "__main__":
     parser.add_argument("--src", dest="source", type=str)
     parser.add_argument("--ref", dest="target", type=str)
     parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
+    parser.add_argument("--pitch-shift", type=int, choices=range(-12, 13))
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
     parser.add_argument("--project", type=str)
     parser.add_argument("--output-path", type=str, default="outputs")
+    parser.add_argument("--format", choices=("wav", "flac"), default="wav")
     parser.add_argument("--cuda", type=str, default="0")
     parser.add_argument("--fp32", action="store_true")
     parser.add_argument("--accompany", type=str)
@@ -556,10 +558,12 @@ if __name__ == "__main__":
     args.length_adjust = 1.0
     args.inference_cfg_rate = 0.7
     args.f0_condition = True
-    args.semi_tone_shift = None  # If None, the tone is automatically sandhi
+    args.semi_tone_shift = args.pitch_shift
 
     models = load_models_api(args, device=args.cuda)
     vc = run_inference(args, models, device=args.cuda)
+    
+    # 指定した伴奏音源を変換後のボーカルへミックスして、完成音源を作る
     if args.accompany:
         output_dir = os.path.dirname(vc)
         output_name = os.path.basename(vc)
