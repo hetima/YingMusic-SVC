@@ -139,6 +139,16 @@ def select_project_directory(models_dir="models"):
     return selected
 
 
+def resolve_source_path(source):
+    """入力または引数で指定されたソース音声パスを正規化する。"""
+    if source is None:
+        source = questionary.path("ソース音声を指定してください:").ask()
+        if source is None:
+            raise KeyboardInterrupt("ソース音声の指定がキャンセルされました。")
+
+    return source.strip().strip("\"'")
+
+
 def load_models_api(args, device=torch.device("cuda")):
     dit_checkpoint_path = args.checkpoint
     print(f"load model from {dit_checkpoint_path}")
@@ -513,6 +523,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
+        args.source = resolve_source_path(args.source)
+
         if args.project is None and args.checkpoint is None and args.target is None:
             args.project = select_project_directory()
 
