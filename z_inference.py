@@ -523,7 +523,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        args.source = resolve_source_path(args.source)
 
         if args.project is None and args.checkpoint is None and args.target is None:
             args.project = select_project_directory()
@@ -544,6 +543,8 @@ if __name__ == "__main__":
         args.target = select_file_from_directory(
             args.target, {".wav", ".flac", ".mp3"}, "参照音声を選択してください:"
         )
+        
+        args.source = resolve_source_path(args.source)
     except (FileNotFoundError, KeyboardInterrupt) as error:
         parser.error(str(error))
 
