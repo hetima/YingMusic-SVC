@@ -517,7 +517,7 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str)
     parser.add_argument("--output-path", type=str, default="outputs")
     parser.add_argument("--cuda", type=str, default="0")
-    parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--fp32", action="store_true")
     parser.add_argument("--accompany", type=str)
     parser.add_argument("--config", type=str, default="configs/YingMusic-SVC.yml")
     args = parser.parse_args()
@@ -547,6 +547,7 @@ if __name__ == "__main__":
     except (FileNotFoundError, KeyboardInterrupt) as error:
         parser.error(str(error))
 
+    args.fp16 = not args.fp32
     args.cuda = torch.device(f"cuda:{args.cuda}")
     if args.fp16:
         print("Start fp16 to accelerate inference！")
