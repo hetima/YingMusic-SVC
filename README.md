@@ -4,7 +4,7 @@
 ↓\
 [rabbit321011/YingMusic-SVC-fine-tune](https://github.com/rabbit321011/YingMusic-SVC-fine-tune) ファインチューニング対応fork\
 ↓\
-これ（とりあえずWindowsで動くようにした）
+これ（Windowsで動くようにした。新しい推論スクリプトを追加）
 
 
 ## インストール
@@ -20,6 +20,65 @@ uv pip install -r requirements.txt
 - 作者は5000個とか準備しているが、もっと少なく100個くらいでもよさそう
 - 途中保存されたpthから再開したい場合は`--pretrained-ckpt`を省略する
 - `--max-epochs`パラメータを持っていて、デフォルト20なのでデータセットが小さいと早期終了する。9999とか指定しておく
+
+## z_inference.py
+このforkで新規追加した対話選択対応の推論スクリプトです。`models`フォルダにプロジェクトごとのフォルダを作成し、その中に推論用の`.pth`と参照音声を配置すると使いやすいです。仕様上、ファインチューニングをしたモデルを使用する場合も必ず参照音声が必要です。
+
+```
+models/
+└─ project_name/
+   ├─ model.pth
+   ├─ reference1.wav
+   └─ reference2.wav
+```
+
+基本的な使用例です。
+
+```
+python z_inference.py --src input.wav --project project_name
+```
+
+`--project project_name`で指定したフォルダが直接存在しない場合は、`models/project_name`を探します。プロジェクトフォルダ内に複数の`.pth`や参照音声がある場合は、サブフォルダを含めて検索し、Questionaryの一覧から使用するファイルを選択します。
+
+`--project`、`--checkpoint`、`--ref`をすべて省略すると、`models`直下のプロジェクトフォルダが一覧表示されます。`--src`を省略した場合も、ソース音声のパスを対話形式で入力できます。
+
+プロジェクトを使用すれば引数なしで実行して推論を済ませることができます。普通にモデルと参照音声を個別に指定することもできます。
+
+```
+python z_inference.py `
+    --src input.wav `
+    --ref reference.wav `
+    --checkpoint pretrained/model.pth `
+    --output-path outputs
+```
+
+`--checkpoint`にフォルダを指定すると`.pth`、`--ref`にフォルダを指定すると`.wav`、`.flac`、`.mp3`をサブフォルダも含めて検索して選択できます。`--project`を指定した場合は、`--checkpoint`と`--ref`の指定よりも`--project`が優先されます。
+
+| 引数 | 説明 |
+| --- | --- |
+| `--src` | 変換するソース音声のパス。省略時は対話入力 |
+| `--project` | `.pth`と参照音声を格納したプロジェクトフォルダ。存在しない場合は`models/<project>`を検索 |
+| `--ref` | 参照音声ファイル、または検索対象フォルダ |
+| `--checkpoint` | `.pth`ファイルまたは検索対象フォルダ |
+| `--steps` | 拡散ステップ数。デフォルトは`30` |
+| `--pitch-shift` | ソース音声のF0条件を半音単位で変更。`-12`～`12`。省略時は自動調整 |
+| `--output-path` | 出力フォルダ。デフォルトは`outputs` |
+| `--format` | 出力フォーマット。`wav`か`flac`。デフォルトは`wav` |
+| `--cuda` | 使用するCUDAデバイス番号。デフォルトは`0` |
+| `--fp32` | FP32で推論。省略時はFP16混合精度 |
+| `--config` | 設定ファイル。デフォルトは`configs/YingMusic-SVC.yml` |
+
+出力ファイルがすでに存在する場合は、上書きせずに`_01`、`_02`のような連番を付けて保存します。
+
+
+## z_convert_pth.py
+このforkで新規追加したファイルです。学習途中の大きなpthファイルを推論に必要なパラメータのみに刈り取ってサイズを小さくします。
+
+```
+z_convert_pth.py /pathto/model.pth /pathto/converted.pth
+```
+
+と実行します。書き出しパスを省略すると`モデル名_final.pth`に書き出します。
 
 
 ---
