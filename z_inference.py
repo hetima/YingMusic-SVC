@@ -49,6 +49,20 @@ def crossfade(chunk1, chunk2, overlap):
     return chunk2
 
 
+def get_unique_output_path(path):
+    """既存ファイルと重複しない書き出しパスを返す。"""
+    if not os.path.exists(path):
+        return path
+
+    base, extension = os.path.splitext(path)
+    index = 1
+    while True:
+        candidate = f"{base}_{index:02d}{extension}"
+        if not os.path.exists(candidate):
+            return candidate
+        index += 1
+
+
 def load_models_api(args, device=torch.device("cuda")):
     dit_checkpoint_path = args.checkpoint
     print(f"load model from {dit_checkpoint_path}")
@@ -402,26 +416,25 @@ def run_inference(args, model_bundle, device=torch.device("cuda")):
         vc_name = f"{src_name}_{tgt_name}_" + args.uuid + ".wav"
     else:
         vc_name = f"{tgt_name}_{src_name}_{pitch_shift}.wav"
-    output_path = os.path.join(output_dir, vc_name)
+    output_path = get_unique_output_path(os.path.join(output_dir, vc_name))
     sf.write(output_path, vc_wave[0].cpu().numpy(), sr)
     return output_path
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str)
-    parser.add_argument("--target", type=str)
-    parser.add_argument("--diffusion-steps", type=int, default=30)
+    parser.add_argument("--src", dest="source", type=str)
+    parser.add_argument("--ref", dest="target", type=str)
+    parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
-    parser.add_argument("--output-path", type=str, required=True)
-    parser.add_argument("--cuda", type=str)
-    parser.add_argument("--fp16", type=str)
+    parser.add_argument("--output-path", type=str, default="outputs")
+    parser.add_argument("--cuda", type=str, default="0")
+    parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--accompany", type=str)
-    parser.add_argument("--config", type=str)
+    parser.add_argument("--config", type=str, default="configs/YingMusic-SVC.yml")
     args = parser.parse_args()
 
     args.cuda = torch.device(f"cuda:{args.cuda}")
-    args.fp16 = str2bool(args.fp16)
     if args.fp16:
         print("Start fp16 to accelerate inference！")
 
