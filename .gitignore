@@ -11,6 +11,7 @@ venv/
 *.pth
 *.pt
 output_models/
+models/
 
 # Checkpoints cache
 checkpoints/
