@@ -149,6 +149,7 @@ def load_models_api(args, device=torch.device("cuda")):
         def semantic_fn(waves_16k):
             ori_inputs = whisper_feature_extractor(
                 [waves_16k.squeeze(0).cpu().numpy()],
+                sampling_rate=16000,
                 return_tensors="pt",
                 return_attention_mask=True,
             )
