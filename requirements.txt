@@ -32,3 +32,4 @@ loralib
 beartype
 rotary_embedding_torch
 tqdm
+questionary

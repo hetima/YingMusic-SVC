@@ -8,6 +8,7 @@ import warnings
 import argparse
 import torch
 import yaml
+import questionary
 
 warnings.simplefilter("ignore")
 
@@ -61,6 +62,81 @@ def get_unique_output_path(path):
         if not os.path.exists(candidate):
             return candidate
         index += 1
+
+
+def select_file_from_directory(path, extensions, message):
+    """フォルダ内の対象ファイルを再帰検索し、選択したパスを返す。"""
+    if not os.path.isdir(path):
+        return path
+
+    files = sorted(
+        (
+            file_path
+            for root, _, names in os.walk(path)
+            for name in names
+            if os.path.splitext(name)[1].lower() in extensions
+            for file_path in [os.path.join(root, name)]
+        ),
+        key=lambda file_path: os.path.relpath(file_path, path).lower(),
+    )
+    if not files:
+        extensions_text = ", ".join(sorted(extensions))
+        raise FileNotFoundError(
+            f"{path} に対象ファイルがありません: {extensions_text}"
+        )
+
+    choices = [
+        questionary.Choice(os.path.relpath(file_path, path), value=file_path)
+        for file_path in files
+    ]
+    selected = questionary.select(message, choices=choices).ask()
+    if selected is None:
+        raise KeyboardInterrupt("ファイル選択がキャンセルされました。")
+    return selected
+
+
+def resolve_project_directory(project):
+    """プロジェクトフォルダを直接指定またはmodels配下から解決する。"""
+    if os.path.isdir(project):
+        return project
+
+    models_project = os.path.join("models", project)
+    if os.path.isdir(models_project):
+        return models_project
+
+    raise FileNotFoundError(
+        f"プロジェクトフォルダが見つかりません: {project} または {models_project}"
+    )
+
+
+def select_project_directory(models_dir="models"):
+    """models直下のプロジェクトフォルダを選択する。"""
+    if not os.path.isdir(models_dir):
+        raise FileNotFoundError(f"モデルフォルダが見つかりません: {models_dir}")
+
+    directories = sorted(
+        (
+            entry.path
+            for entry in os.scandir(models_dir)
+            if entry.is_dir()
+        ),
+        key=lambda path: os.path.basename(path).lower(),
+    )
+    if not directories:
+        raise FileNotFoundError(
+            f"{models_dir} にプロジェクトフォルダがありません。"
+        )
+
+    choices = [
+        questionary.Choice(os.path.basename(path), value=path)
+        for path in directories
+    ]
+    selected = questionary.select(
+        "プロジェクトを選択してください:", choices=choices
+    ).ask()
+    if selected is None:
+        raise KeyboardInterrupt("プロジェクト選択がキャンセルされました。")
+    return selected
 
 
 def load_models_api(args, device=torch.device("cuda")):
@@ -428,12 +504,36 @@ if __name__ == "__main__":
     parser.add_argument("--ref", dest="target", type=str)
     parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
+    parser.add_argument("--project", type=str)
     parser.add_argument("--output-path", type=str, default="outputs")
     parser.add_argument("--cuda", type=str, default="0")
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--accompany", type=str)
     parser.add_argument("--config", type=str, default="configs/YingMusic-SVC.yml")
     args = parser.parse_args()
+
+    try:
+        if args.project is None and args.checkpoint is None and args.target is None:
+            args.project = select_project_directory()
+
+        if args.project is not None:
+            args.project = resolve_project_directory(args.project)
+            args.checkpoint = args.project
+            args.target = args.project
+
+        if args.checkpoint is None:
+            parser.error("--checkpoint または --project を指定してください。")
+        if args.target is None:
+            parser.error("--ref または --project を指定してください。")
+
+        args.checkpoint = select_file_from_directory(
+            args.checkpoint, {".pth"}, "チェックポイントを選択してください:"
+        )
+        args.target = select_file_from_directory(
+            args.target, {".wav", ".flac", ".mp3"}, "参照音声を選択してください:"
+        )
+    except (FileNotFoundError, KeyboardInterrupt) as error:
+        parser.error(str(error))
 
     args.cuda = torch.device(f"cuda:{args.cuda}")
     if args.fp16:
