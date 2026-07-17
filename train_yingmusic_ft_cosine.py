@@ -425,7 +425,7 @@ if __name__ == '__main__':
                         help='Path to training data (e.g. train_data/)')
     parser.add_argument('--run-name', type=str, default='yingmusic_ft',
                         help='Experiment name, output saved to output_models/<name>/')
-    parser.add_argument('--batch-size', type=int, default=2)
+    parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--max-steps', type=int, default=2000)
     parser.add_argument('--max-epochs', type=int, default=1000)
     parser.add_argument('--save-every', type=int, default=500)
