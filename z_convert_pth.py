@@ -5,16 +5,28 @@ import torch
 
 
 def convert_checkpoint(input_path: Path, output_path: Path) -> list[str]:
-    """学習途中のチェックポイントを推論用の最終保存形式へ変換する。"""
+    """通常またはLoRAの中間checkpointを最終保存形式へ変換する。"""
     checkpoint = torch.load(input_path, map_location="cpu", weights_only=False)
     if not isinstance(checkpoint, dict):
         raise ValueError("チェックポイントの最上位が辞書ではありません。")
-    if "net" not in checkpoint or not isinstance(checkpoint["net"], dict):
-        raise ValueError("チェックポイントに辞書形式の 'net' がありません。")
 
-    converted = {"net": checkpoint["net"]}
-    if "spk_embedding" in checkpoint:
-        converted["spk_embedding"] = checkpoint["spk_embedding"]
+    if "net" in checkpoint and isinstance(checkpoint["net"], dict):
+        converted = {"net": checkpoint["net"]}
+        if "spk_embedding" in checkpoint:
+            converted["spk_embedding"] = checkpoint["spk_embedding"]
+    elif (
+        isinstance(checkpoint.get("metadata"), dict)
+        and isinstance(checkpoint.get("lora"), dict)
+    ):
+        converted = {
+            "metadata": checkpoint["metadata"],
+            "lora": checkpoint["lora"],
+        }
+    else:
+        raise ValueError(
+            "チェックポイントに辞書形式の 'net'、または "
+            "'metadata' と 'lora' がありません。"
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(converted, output_path)
@@ -23,7 +35,7 @@ def convert_checkpoint(input_path: Path, output_path: Path) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="学習途中の.pthを最終保存形式へ変換します。"
+        description="通常またはLoRAの学習途中の.pthを最終保存形式へ変換します。"
     )
     parser.add_argument("input", type=Path, help="変換元の.pthファイル")
     parser.add_argument(
