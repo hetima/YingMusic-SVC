@@ -23,6 +23,7 @@ import soundfile as sf
 from modules.commons import str2bool
 from mm4 import preprocess_voice_conversion
 from hf_utils import load_custom_model_from_hf
+from train.lora_utils import inject_lora, load_lora_state, merge_lora_modules
 
 
 ########## tools ##########
@@ -151,6 +152,8 @@ def resolve_source_path(source):
 
 def load_models_api(args, device=torch.device("cuda")):
     dit_checkpoint_path = args.checkpoint
+    lora_path = getattr(args, "lora", None)
+    lora_scale = getattr(args, "lora_scale", 1.0)
     print(f"load model from {dit_checkpoint_path}")
     dit_config_path = args.config
     print(f"load config from {dit_config_path}")
@@ -180,6 +183,31 @@ def load_models_api(args, device=torch.device("cuda")):
         ignore_modules=[],
         is_distributed=False,
     )
+
+    # LoRA指定時だけ差分を読み込み、指定倍率で通常Linearへマージする
+    if lora_path is not None:
+        print(f"load LoRA from {lora_path} (scale={lora_scale})")
+        lora_checkpoint = torch.load(
+            lora_path, map_location="cpu", weights_only=False
+        )
+        if not isinstance(lora_checkpoint, dict) or "lora" not in lora_checkpoint:
+            raise ValueError(f"LoRA checkpointの形式が不正です: {lora_path}")
+        metadata = lora_checkpoint.get("metadata", {})
+        if metadata.get("format") != "yingmusic_lora_v1":
+            raise ValueError(
+                "対応していないLoRA checkpoint形式です: "
+                f"{metadata.get('format')!r}"
+            )
+        inject_lora(
+            model.cfm,
+            rank=metadata["rank"],
+            alpha=metadata["alpha"],
+            dropout=0.0,
+            target_modules=metadata["target_modules"],
+        )
+        load_lora_state(model.cfm, lora_checkpoint["lora"])
+        merged_count = merge_lora_modules(model.cfm, scale=lora_scale)
+        print(f"merged {merged_count} LoRA modules")
 
     for key in model:
         model[key].eval()
@@ -515,6 +543,8 @@ if __name__ == "__main__":
     parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
     parser.add_argument("--pitch-shift", type=int, choices=range(-12, 13))
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
+    parser.add_argument("--lora", type=str, help="Path to lora_final.pth")
+    parser.add_argument("--lora-scale", type=float, default=1.0)
     parser.add_argument("--project", type=str)
     parser.add_argument("--output-path", type=str, default="outputs")
     parser.add_argument("--format", choices=("wav", "flac"), default="wav")
@@ -542,6 +572,10 @@ if __name__ == "__main__":
         args.checkpoint = select_file_from_directory(
             args.checkpoint, {".pth"}, "チェックポイントを選択してください:"
         )
+        if args.lora is not None:
+            args.lora = select_file_from_directory(
+                args.lora, {".pth"}, "LoRAを選択してください:"
+            )
         args.target = select_file_from_directory(
             args.target, {".wav", ".flac", ".mp3"}, "参照音声を選択してください:"
         )
