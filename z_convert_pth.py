@@ -22,6 +22,8 @@ def convert_checkpoint(input_path: Path, output_path: Path) -> list[str]:
             "metadata": checkpoint["metadata"],
             "lora": checkpoint["lora"],
         }
+        if "spk_embedding" in checkpoint:
+            converted["spk_embedding"] = checkpoint["spk_embedding"]
     else:
         raise ValueError(
             "チェックポイントに辞書形式の 'net'、または "

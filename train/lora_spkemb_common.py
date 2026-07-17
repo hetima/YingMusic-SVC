@@ -1,17 +1,10 @@
-"""train_yingmusic_ft_cosine.pyを基にしたLoRA学習スクリプト。"""
+"""spk_embedding版LoRA Trainerの共通処理。"""
 
 import argparse
 import glob
 import os
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 import torch
-import torch.multiprocessing as mp
 from torch.optim import AdamW
 from tqdm import tqdm
 
@@ -24,34 +17,15 @@ from train.lora_utils import (
     lora_state_dict,
     mark_only_lora_trainable,
 )
-from train_yingmusic_ft_cosine import Trainer as FullTrainer
+from train.train_lora_cosine import LoRAOptimizerAdapter
 
 
-class LoRAOptimizerAdapter:
-    """既存TrainerのMultiOptimizer呼び出しを単一LoRA optimizerへ接続する。"""
+class LoRASpkEmbTrainerMixin:
+    """元のspk_embedding TrainerをLoRA学習へ差し替えるMixin。"""
 
-    def __init__(self, optimizer, scheduler):
-        self.optimizer = optimizer
-        self.scheduler_object = scheduler
-
-    def zero_grad(self):
-        self.optimizer.zero_grad()
-
-    def step(self, key=None, scaler=None):
-        if key != "cfm":
-            return
-        if scaler is None:
-            self.optimizer.step()
-        else:
-            scaler.step(self.optimizer)
-
-    def scheduler(self, *args, key=None):
-        if key == "cfm":
-            self.scheduler_object.step()
-
-
-class Trainer(FullTrainer):
-    """DiTのLoRAパラメータだけを更新するTrainer。"""
+    trainer_variant = "spkemb"
+    scheduler_warmup = 3000
+    scheduler_lr_min = 1e-6
 
     def __init__(
         self,
@@ -85,7 +59,16 @@ class Trainer(FullTrainer):
             for parameter in module.parameters():
                 parameter.requires_grad = False
         mark_only_lora_trainable(self.model.cfm)
-        trainable = [p for p in self.model.cfm.parameters() if p.requires_grad]
+        for parameter in self.spk_embedding.parameters():
+            parameter.requires_grad = True
+
+        trainable = [
+            parameter
+            for module in self.model.values()
+            for parameter in module.parameters()
+            if parameter.requires_grad
+        ]
+        trainable.extend(self.spk_embedding.parameters())
         optimizer = AdamW(
             trainable,
             lr=lora_lr,
@@ -95,19 +78,23 @@ class Trainer(FullTrainer):
         )
         scheduler = CosineWarmupScheduler(
             optimizer,
-            warmup_steps=500,
+            warmup_steps=self.scheduler_warmup,
             total_steps=self.max_steps,
-            lr_min=1e-6,
+            lr_min=self.scheduler_lr_min,
         )
         self.optimizer = LoRAOptimizerAdapter(optimizer, scheduler)
         self._resume_lora_if_available()
-        trainable_count = sum(p.numel() for p in trainable)
-        print(f"LoRA modules: {len(self.replaced_modules)}, trainable parameters: {trainable_count:,}")
+        trainable_count = sum(parameter.numel() for parameter in trainable)
+        print(
+            f"LoRA modules: {len(self.replaced_modules)}, "
+            f"trainable parameters (including spk_embedding): {trainable_count:,}"
+        )
 
     def _metadata(self):
         """保存・互換性確認に使うLoRA設定を返す。"""
         return {
             "format": "yingmusic_lora_v1",
+            "trainer_variant": self.trainer_variant,
             "base_checkpoint": self.base_checkpoint,
             "rank": self.lora_rank,
             "alpha": self.lora_alpha,
@@ -116,7 +103,7 @@ class Trainer(FullTrainer):
         }
 
     def _resume_lora_if_available(self):
-        """runディレクトリ内の最新LoRA checkpointから学習を再開する。"""
+        """runディレクトリ内の最新LoRA checkpointから再開する。"""
         checkpoints = glob.glob(os.path.join(self.log_dir, "LoRA_epoch_*_step_*.pth"))
         if not checkpoints:
             self.epoch, self.iters = 0, 0
@@ -125,13 +112,14 @@ class Trainer(FullTrainer):
         state = torch.load(latest, map_location="cpu", weights_only=False)
         metadata = state.get("metadata", {})
         expected = self._metadata()
-        for key in ("format", "rank", "alpha", "target_modules"):
+        for key in ("format", "trainer_variant", "rank", "alpha", "target_modules"):
             if metadata.get(key) != expected[key]:
                 raise ValueError(
                     f"LoRA checkpointの{key}が現在の設定と一致しません: "
                     f"{metadata.get(key)!r} != {expected[key]!r}"
                 )
         load_lora_state(self.model.cfm, state["lora"])
+        self.spk_embedding.load_state_dict(state["spk_embedding"])
         self.optimizer.optimizer.load_state_dict(state["optimizer"])
         self.optimizer.scheduler_object.load_state_dict(state["scheduler"])
         self.epoch = state.get("epoch", 0)
@@ -139,10 +127,14 @@ class Trainer(FullTrainer):
         print(f"Resumed LoRA checkpoint from {latest} at step {self.iters}")
 
     def _save_checkpoint(self):
-        """学習再開用のLoRA中間checkpointを保存する。"""
+        """学習再開用のLoRA＋話者埋め込みcheckpointを保存する。"""
         state = {
             "metadata": self._metadata(),
             "lora": lora_state_dict(self.model.cfm),
+            "spk_embedding": {
+                key: value.detach().cpu()
+                for key, value in self.spk_embedding.state_dict().items()
+            },
             "optimizer": self.optimizer.optimizer.state_dict(),
             "scheduler": self.optimizer.scheduler_object.state_dict(),
             "iters": self.iters,
@@ -158,6 +150,7 @@ class Trainer(FullTrainer):
     def train_one_epoch(self):
         """1 epoch学習し、指定間隔でLoRA checkpointを保存する。"""
         _ = [self.model[key].train() for key in self.model]
+        self.spk_embedding.train()
         for batch in tqdm(self.train_dataloader):
             batch = [value.to(self.device) for value in batch]
             loss = self.train_one_step(batch)
@@ -174,28 +167,51 @@ class Trainer(FullTrainer):
                 break
 
     def train(self):
-        """LoRA学習を実行し、最終差分のみを保存する。"""
+        """LoRA学習を実行し、最終差分と話者埋め込みを保存する。"""
         self.ema_loss = 0
         self.loss_smoothing_rate = 0.99
-        start_epoch = self.epoch
-        for epoch in range(start_epoch, self.n_epochs):
+        for epoch in range(self.epoch, self.n_epochs):
             self.epoch = epoch
             self.train_one_epoch()
             if self.iters >= self.max_steps:
                 break
-
         state = {
             "metadata": self._metadata(),
             "lora": lora_state_dict(self.model.cfm),
+            "spk_embedding": {
+                key: value.detach().cpu()
+                for key, value in self.spk_embedding.state_dict().items()
+            },
         }
         path = os.path.join(self.log_dir, "lora_final.pth")
         torch.save(state, path)
         print(f"Final LoRA saved at {path}")
 
 
-def main(args):
-    """CLI引数からLoRA Trainerを構築して学習する。"""
-    trainer = Trainer(
+def build_parser(description):
+    """spk_embedding版LoRA学習用の共通CLIを構築する。"""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--pretrained-ckpt", required=True)
+    parser.add_argument("--dataset-dir", required=True)
+    parser.add_argument("--run-name", default="yingmusic_lora_spkemb")
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--max-steps", type=int, default=60000)
+    parser.add_argument("--max-epochs", type=int, default=20)
+    parser.add_argument("--save-every", type=int, default=10000)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--lora-rank", type=int, default=8)
+    parser.add_argument("--lora-alpha", type=int, default=16)
+    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--lora-lr", type=float, default=1e-4)
+    parser.add_argument("--gpu", type=int, default=0)
+    return parser
+
+
+def run_training(trainer_class, args):
+    """共通CLI引数から指定Trainerを構築して学習する。"""
+    device = "mps" if torch.backends.mps.is_available() else f"cuda:{args.gpu}"
+    trainer = trainer_class(
         config_path=args.config,
         pretrained_ckpt_path=args.pretrained_ckpt,
         data_dir=args.dataset_dir,
@@ -205,38 +221,10 @@ def main(args):
         max_epochs=args.max_epochs,
         save_interval=args.save_every,
         num_workers=args.num_workers,
-        device=args.device,
+        device=device,
         lora_rank=args.lora_rank,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         lora_lr=args.lora_lr,
     )
     trainer.train()
-
-
-if __name__ == "__main__":
-    if sys.platform == "win32":
-        mp.freeze_support()
-        mp.set_start_method("spawn", force=True)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--pretrained-ckpt", required=True)
-    parser.add_argument("--dataset-dir", required=True)
-    parser.add_argument("--run-name", default="yingmusic_lora")
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--max-steps", type=int, default=2000)
-    parser.add_argument("--max-epochs", type=int, default=1000)
-    parser.add_argument("--save-every", type=int, default=500)
-    parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--lora-rank", type=int, default=8)
-    parser.add_argument("--lora-alpha", type=int, default=16)
-    parser.add_argument("--lora-dropout", type=float, default=0.05)
-    parser.add_argument("--lora-lr", type=float, default=1e-4)
-    parser.add_argument("--gpu", type=int, default=0)
-    args = parser.parse_args()
-    if torch.backends.mps.is_available():
-        args.device = "mps"
-    else:
-        args.device = f"cuda:{args.gpu}"
-    main(args)

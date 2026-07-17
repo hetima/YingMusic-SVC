@@ -43,7 +43,10 @@ def main(args):
 
     output_dir = os.path.dirname(os.path.abspath(args.output))
     os.makedirs(output_dir, exist_ok=True)
-    torch.save({"net": {key: model[key].state_dict() for key in model}}, args.output)
+    output = {"net": {key: model[key].state_dict() for key in model}}
+    if "spk_embedding" in state:
+        output["spk_embedding"] = state["spk_embedding"]
+    torch.save(output, args.output)
     print(f"Merged {merged_count} LoRA modules into {args.output}")
 
 
