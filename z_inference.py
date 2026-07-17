@@ -159,6 +159,27 @@ def resolve_source_path(source):
     return source.strip().strip("\"'")
 
 
+def prompt_lora_scale(default_scale):
+    """LoRA適用倍率を対話入力し、浮動小数点数として返す。"""
+    value = questionary.text(
+        "LoRA scaleを入力してください:",
+        default=str(default_scale),
+        validate=lambda text: _validate_float(text),
+    ).ask()
+    if value is None:
+        raise KeyboardInterrupt("LoRA scaleの入力がキャンセルされました。")
+    return float(value)
+
+
+def _validate_float(value):
+    """QuestionaryのLoRA scale入力を検証する。"""
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return "数値を入力してください。"
+    return True
+
+
 def load_models_api(args, device=torch.device("cuda")):
     dit_checkpoint_path = args.checkpoint
     lora_path = getattr(args, "lora", None)
@@ -547,6 +568,11 @@ if __name__ == "__main__":
     parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
     parser.add_argument("--pitch-shift", type=int, choices=range(-12, 13))
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
+    parser.add_argument(
+        "--base-checkpoint",
+        type=str,
+        help="LoRAモードで使用するベースcheckpoint",
+    )
     parser.add_argument("--lora", type=str, help="Path to *.lora.pth")
     parser.add_argument("--lora-scale", type=float, default=1.0)
     parser.add_argument("--project", type=str)
@@ -560,13 +586,27 @@ if __name__ == "__main__":
 
     try:
 
+        lora_project_mode = args.base_checkpoint is not None
+
         if args.project is None and args.checkpoint is None and args.target is None:
             args.project = select_project_directory()
 
         if args.project is not None:
             args.project = resolve_project_directory(args.project)
-            args.checkpoint = args.project
             args.target = args.project
+            if lora_project_mode:
+                if args.lora is None:
+                    args.lora = args.project
+            else:
+                args.checkpoint = args.project
+
+        if lora_project_mode:
+            args.checkpoint = args.base_checkpoint
+            if args.lora is None:
+                parser.error(
+                    "--base-checkpointを使用する場合は、"
+                    "--projectまたは--loraを指定してください。"
+                )
 
         if args.checkpoint is None:
             parser.error("--checkpoint または --project を指定してください。")
@@ -586,6 +626,8 @@ if __name__ == "__main__":
                 "LoRAを選択してください:",
                 required_suffix=".lora.pth",
             )
+        if lora_project_mode:
+            args.lora_scale = prompt_lora_scale(args.lora_scale)
         args.target = select_file_from_directory(
             args.target, {".wav", ".flac", ".mp3"}, "参照音声を選択してください:"
         )

@@ -40,7 +40,7 @@ python z_inference.py --src input.wav --project project_name
 
 `--project project_name`で指定したフォルダが直接存在しない場合は、`models/project_name`を探します。プロジェクトフォルダ内に複数の`.pth`や参照音声がある場合は、サブフォルダを含めて検索し、Questionaryの一覧から使用するファイルを選択します。
 
-`--project`、`--checkpoint`、`--ref`をすべて省略すると、`models`直下のプロジェクトフォルダが一覧表示されます。`--src`を省略した場合も、ソース音声のパスを対話形式で入力できます。
+`--project`、`--checkpoint`、`--ref`をすべて省略すると、`models`直下のプロジェクトフォルダが一覧表示されます。`--src`を省略した場合も、ソース音声のパスを対話形式で入力できます。LoRAを切り替えながら推論したい場合はプロジェクトフォルダにLoRAファイルを置き、`--base-checkpoint`のみ指定してください。対話形式でLoRAを選ぶことができます。
 
 プロジェクトを使用すれば引数なしで実行して推論を済ませることができます。普通にモデルと参照音声を個別に指定することもできます。
 
@@ -60,6 +60,9 @@ python z_inference.py `
 | `--project` | `.pth`と参照音声を格納したプロジェクトフォルダ。存在しない場合は`models/<project>`を検索 |
 | `--ref` | 参照音声ファイル、または検索対象フォルダ |
 | `--checkpoint` | `.pth`ファイルまたは検索対象フォルダ |
+| `--base-checkpoint` | project内のLoRAを使う場合のベースcheckpoint。指定時はLoRA選択とscale入力を対話表示 |
+| `--lora` | 適用する`.lora.pth`ファイルまたは検索対象フォルダ |
+| `--lora-scale` | LoRA適用倍率。デフォルトは`1.0` |
 | `--steps` | 拡散ステップ数。デフォルトは`30` |
 | `--pitch-shift` | ソース音声のF0条件を半音単位で変更。`-12`～`12`。省略時は自動調整 |
 | `--output-path` | 出力フォルダ。デフォルトは`outputs` |
@@ -67,8 +70,6 @@ python z_inference.py `
 | `--cuda` | 使用するCUDAデバイス番号。デフォルトは`0` |
 | `--fp32` | FP32で推論。省略時はFP16混合精度 |
 | `--config` | 設定ファイル。デフォルトは`configs/YingMusic-SVC.yml` |
-| `--lora` | 適用するLoRAファイルのパス |
-| `--lora-scale` | 適用するLoRAの強度 |
 
 出力ファイルがすでに存在する場合は、上書きせずに`_01`、`_02`のような連番を付けて保存します。
 
@@ -127,6 +128,17 @@ python z_inference.py `
     --ref reference.wav `
     --checkpoint models/YingMusic-SVC-full.pt `
     --lora output_models/singer_lora/final.lora.pth `
+    --lora-scale 1.0 `
+    --output-path outputs
+```
+
+LoRAと参照音声を同じprojectフォルダへ入れている場合は、ベースモデルだけを指定して対話選択できます。LoRAを選択した後、`--lora-scale`の値を初期値とするscale入力が毎回表示されます。
+
+```powershell
+python z_inference.py `
+    --src input.wav `
+    --project singer_lora `
+    --base-checkpoint models/YingMusic-SVC-full.pt `
     --lora-scale 1.0 `
     --output-path outputs
 ```
