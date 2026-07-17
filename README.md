@@ -4,7 +4,7 @@
 ↓\
 [rabbit321011/YingMusic-SVC-fine-tune](https://github.com/rabbit321011/YingMusic-SVC-fine-tune) ファインチューニング対応fork\
 ↓\
-これ（Windowsで動くようにした。新しい推論スクリプトを追加）
+これ（Windowsで動くようにした。新しい推論スクリプトを追加。LoRA対応）
 
 
 ## インストール
@@ -67,8 +67,82 @@ python z_inference.py `
 | `--cuda` | 使用するCUDAデバイス番号。デフォルトは`0` |
 | `--fp32` | FP32で推論。省略時はFP16混合精度 |
 | `--config` | 設定ファイル。デフォルトは`configs/YingMusic-SVC.yml` |
+| `--lora` | 適用するLoRAファイルのパス |
+| `--lora-scale` | 適用するLoRAの強度 |
 
 出力ファイルがすでに存在する場合は、上書きせずに`_01`、`_02`のような連番を付けて保存します。
+
+
+## train/train_lora_cosine.py
+このforkで新規追加した、`train_yingmusic_ft_cosine.py`のLoRA版です。ベースモデル全体は更新せず、DiT TransformerのAttentionとFeedForwardへ追加したLoRAパラメータだけを学習します。`configs/YingMusic-SVC.yml`は通常学習と同じものを使用できます。
+
+リポジトリのルートで次のように実行します。
+
+```powershell
+python -m train.train_lora_cosine `
+    --config configs/YingMusic-SVC.yml `
+    --pretrained-ckpt models/YingMusic-SVC-full.pt `
+    --dataset-dir train_data `
+    --run-name singer_lora `
+    --batch-size 2 `
+    --max-steps 2000 `
+    --save-every 500
+```
+
+`--pretrained-ckpt`にはLoRAの適用元となるベースモデルを指定します。この引数は必須です。
+
+| 引数 | 説明 |
+| --- | --- |
+| `--config` | モデル設定ファイル |
+| `--pretrained-ckpt` | 学習元のベースcheckpoint。必須 |
+| `--dataset-dir` | 学習データフォルダ |
+| `--run-name` | `output_models`内に作成する出力フォルダ名 |
+| `--batch-size` | バッチサイズ。デフォルトは`1` |
+| `--max-steps` | 総学習step数。デフォルトは`2000` |
+| `--max-epochs` | 最大epoch数。デフォルトは`1000` |
+| `--save-every` | 中間checkpointの保存間隔。デフォルトは`500`step |
+| `--num-workers` | DataLoaderのworker数。デフォルトは`0` |
+| `--lora-rank` | LoRAのrank。デフォルトは`8` |
+| `--lora-alpha` | LoRAのalpha。デフォルトは`16` |
+| `--lora-dropout` | LoRAのdropout。デフォルトは`0.05` |
+| `--lora-lr` | LoRAの学習率。デフォルトは`1e-4` |
+| `--gpu` | 使用するCUDAデバイス番号。デフォルトは`0` |
+
+学習結果は次のように保存されます。
+
+```text
+output_models/singer_lora/
+├── LoRA_epoch_00000_step_00500.pth  # 学習再開用
+├── LoRA_epoch_00000_step_01000.pth  # 学習再開用
+└── lora_final.pth                   # 推論用LoRA差分
+```
+
+同じ`--run-name`で再実行すると、フォルダ内の最大stepの`LoRA_epoch_*_step_*.pth`を自動的に読み込み、LoRA、optimizer、scheduler、epoch、stepを復元して学習を再開します。再開時は、最初の学習と同じLoRA rank、alpha、対象モジュールを指定してください。
+
+LoRA差分を直接使って推論する場合は、学習時と同じベースモデルを`--checkpoint`へ指定します。
+
+```powershell
+python z_inference.py `
+    --src input.wav `
+    --ref reference.wav `
+    --checkpoint models/YingMusic-SVC-full.pt `
+    --lora output_models/singer_lora/lora_final.pth `
+    --lora-scale 1.0 `
+    --output-path outputs
+```
+
+通常のモデル形式へマージする場合は、別スクリプトを使用します。生成されたモデルはLoRA非対応の既存推論コードでも読み込めます。
+
+```powershell
+python -m train.merge_lora `
+    --config configs/YingMusic-SVC.yml `
+    --base models/YingMusic-SVC-full.pt `
+    --lora output_models/singer_lora/lora_final.pth `
+    --output output_models/singer_lora/merged_model.pth `
+    --scale 1.0
+```
+
+`train\train_lora_spkemb.py`と`train\train_lora_spkemb_v2.py`もあります。使い方はだいたい同じです。
 
 
 ## z_convert_pth.py

@@ -224,7 +224,7 @@ if __name__ == "__main__":
     parser.add_argument("--pretrained-ckpt", required=True)
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--run-name", default="yingmusic_lora")
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=2000)
     parser.add_argument("--max-epochs", type=int, default=1000)
     parser.add_argument("--save-every", type=int, default=500)
