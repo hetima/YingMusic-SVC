@@ -18,6 +18,7 @@ from tqdm import tqdm
 from optimizers_cosine import CosineWarmupScheduler
 from train.lora_utils import (
     DEFAULT_TARGET_MODULES,
+    LORA_FORMAT,
     checkpoint_step,
     inject_lora,
     load_lora_state,
@@ -107,7 +108,7 @@ class Trainer(FullTrainer):
     def _metadata(self):
         """保存・互換性確認に使うLoRA設定を返す。"""
         return {
-            "format": "yingmusic_lora_v1",
+            "format": LORA_FORMAT,
             "base_checkpoint": self.base_checkpoint,
             "rank": self.lora_rank,
             "alpha": self.lora_alpha,
@@ -117,7 +118,13 @@ class Trainer(FullTrainer):
 
     def _resume_lora_if_available(self):
         """runディレクトリ内の最新LoRA checkpointから学習を再開する。"""
-        checkpoints = glob.glob(os.path.join(self.log_dir, "LoRA_epoch_*_step_*.pth"))
+        checkpoints = glob.glob(
+            os.path.join(self.log_dir, "LoRA_epoch_*_step_*.lora.pth")
+        )
+        # 旧命名の中間checkpointも再開元として扱う
+        checkpoints.extend(
+            glob.glob(os.path.join(self.log_dir, "LoRA_epoch_*_step_*.pth"))
+        )
         if not checkpoints:
             self.epoch, self.iters = 0, 0
             return
@@ -150,7 +157,7 @@ class Trainer(FullTrainer):
         }
         path = os.path.join(
             self.log_dir,
-            f"LoRA_epoch_{self.epoch:05d}_step_{self.iters:05d}.pth",
+            f"LoRA_epoch_{self.epoch:05d}_step_{self.iters:05d}.lora.pth",
         )
         torch.save(state, path)
         print(f"LoRA checkpoint saved at {path}")
@@ -188,7 +195,7 @@ class Trainer(FullTrainer):
             "metadata": self._metadata(),
             "lora": lora_state_dict(self.model.cfm),
         }
-        path = os.path.join(self.log_dir, "lora_final.pth")
+        path = os.path.join(self.log_dir, "final.lora.pth")
         torch.save(state, path)
         print(f"Final LoRA saved at {path}")
 

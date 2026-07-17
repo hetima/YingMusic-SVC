@@ -112,12 +112,12 @@ python -m train.train_lora_cosine `
 
 ```text
 output_models/singer_lora/
-├── LoRA_epoch_00000_step_00500.pth  # 学習再開用
-├── LoRA_epoch_00000_step_01000.pth  # 学習再開用
-└── lora_final.pth                   # 推論用LoRA差分
+├── LoRA_epoch_00000_step_00500.lora.pth  # 学習再開用
+├── LoRA_epoch_00000_step_01000.lora.pth  # 学習再開用
+└── final.lora.pth                        # 推論用LoRA差分
 ```
 
-同じ`--run-name`で再実行すると、フォルダ内の最大stepの`LoRA_epoch_*_step_*.pth`を自動的に読み込み、LoRA、optimizer、scheduler、epoch、stepを復元して学習を再開します。再開時は、最初の学習と同じLoRA rank、alpha、対象モジュールを指定してください。
+同じ`--run-name`で再実行すると、フォルダ内の最大stepの`LoRA_epoch_*_step_*.lora.pth`を自動的に読み込み、LoRA、optimizer、scheduler、epoch、stepを復元して学習を再開します。再開時は、最初の学習と同じLoRA rank、alpha、対象モジュールを指定してください。
 
 LoRA差分を直接使って推論する場合は、学習時と同じベースモデルを`--checkpoint`へ指定します。
 
@@ -126,7 +126,7 @@ python z_inference.py `
     --src input.wav `
     --ref reference.wav `
     --checkpoint models/YingMusic-SVC-full.pt `
-    --lora output_models/singer_lora/lora_final.pth `
+    --lora output_models/singer_lora/final.lora.pth `
     --lora-scale 1.0 `
     --output-path outputs
 ```
@@ -137,7 +137,7 @@ python z_inference.py `
 python -m train.merge_lora `
     --config configs/YingMusic-SVC.yml `
     --base models/YingMusic-SVC-full.pt `
-    --lora output_models/singer_lora/lora_final.pth `
+    --lora output_models/singer_lora/final.lora.pth `
     --output output_models/singer_lora/merged_model.pth `
     --scale 1.0
 ```

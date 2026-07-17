@@ -13,7 +13,12 @@ import torch
 import yaml
 
 from modules.commons import build_model, load_checkpoint, recursive_munch
-from train.lora_utils import inject_lora, load_lora_state, merge_lora_modules
+from train.lora_utils import (
+    detect_checkpoint_type,
+    inject_lora,
+    load_lora_state,
+    merge_lora_modules,
+)
 
 
 def main(args):
@@ -30,6 +35,8 @@ def main(args):
     )
 
     state = torch.load(args.lora, map_location="cpu", weights_only=False)
+    if detect_checkpoint_type(state) != "lora":
+        raise ValueError(f"LoRA checkpointの形式が不正です: {args.lora}")
     metadata = state["metadata"]
     inject_lora(
         model.cfm,

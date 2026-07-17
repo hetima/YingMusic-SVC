@@ -23,7 +23,12 @@ import soundfile as sf
 from modules.commons import str2bool
 from mm4 import preprocess_voice_conversion
 from hf_utils import load_custom_model_from_hf
-from train.lora_utils import inject_lora, load_lora_state, merge_lora_modules
+from train.lora_utils import (
+    detect_checkpoint_type,
+    inject_lora,
+    load_lora_state,
+    merge_lora_modules,
+)
 
 
 ########## tools ##########
@@ -65,7 +70,9 @@ def get_unique_output_path(path):
         index += 1
 
 
-def select_file_from_directory(path, extensions, message):
+def select_file_from_directory(
+    path, extensions, message, required_suffix=None, excluded_suffix=None
+):
     """フォルダ内の対象ファイルを再帰検索し、選択したパスを返す。"""
     if not os.path.isdir(path):
         return path
@@ -76,6 +83,8 @@ def select_file_from_directory(path, extensions, message):
             for root, _, names in os.walk(path)
             for name in names
             if os.path.splitext(name)[1].lower() in extensions
+            and (required_suffix is None or name.lower().endswith(required_suffix))
+            and (excluded_suffix is None or not name.lower().endswith(excluded_suffix))
             for file_path in [os.path.join(root, name)]
         ),
         key=lambda file_path: os.path.relpath(file_path, path).lower(),
@@ -190,14 +199,9 @@ def load_models_api(args, device=torch.device("cuda")):
         lora_checkpoint = torch.load(
             lora_path, map_location="cpu", weights_only=False
         )
-        if not isinstance(lora_checkpoint, dict) or "lora" not in lora_checkpoint:
+        if detect_checkpoint_type(lora_checkpoint) != "lora":
             raise ValueError(f"LoRA checkpointの形式が不正です: {lora_path}")
         metadata = lora_checkpoint.get("metadata", {})
-        if metadata.get("format") != "yingmusic_lora_v1":
-            raise ValueError(
-                "対応していないLoRA checkpoint形式です: "
-                f"{metadata.get('format')!r}"
-            )
         inject_lora(
             model.cfm,
             rank=metadata["rank"],
@@ -543,7 +547,7 @@ if __name__ == "__main__":
     parser.add_argument("--steps", dest="diffusion_steps", type=int, default=30)
     parser.add_argument("--pitch-shift", type=int, choices=range(-12, 13))
     parser.add_argument("--checkpoint", type=str, help="Path to the checkpoint file")
-    parser.add_argument("--lora", type=str, help="Path to lora_final.pth")
+    parser.add_argument("--lora", type=str, help="Path to *.lora.pth")
     parser.add_argument("--lora-scale", type=float, default=1.0)
     parser.add_argument("--project", type=str)
     parser.add_argument("--output-path", type=str, default="outputs")
@@ -570,11 +574,17 @@ if __name__ == "__main__":
             parser.error("--ref または --project を指定してください。")
 
         args.checkpoint = select_file_from_directory(
-            args.checkpoint, {".pth"}, "チェックポイントを選択してください:"
+            args.checkpoint,
+            {".pth"},
+            "チェックポイントを選択してください:",
+            excluded_suffix=".lora.pth",
         )
         if args.lora is not None:
             args.lora = select_file_from_directory(
-                args.lora, {".pth"}, "LoRAを選択してください:"
+                args.lora,
+                {".pth"},
+                "LoRAを選択してください:",
+                required_suffix=".lora.pth",
             )
         args.target = select_file_from_directory(
             args.target, {".wav", ".flac", ".mp3"}, "参照音声を選択してください:"

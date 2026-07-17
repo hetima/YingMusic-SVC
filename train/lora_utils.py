@@ -9,6 +9,23 @@ from torch import nn
 
 
 DEFAULT_TARGET_MODULES = ("wqkv", "wq", "wkv", "wo", "w1", "w2", "w3")
+LORA_FORMAT = "yingmusic_lora_v1"
+
+
+def detect_checkpoint_type(checkpoint: object) -> str:
+    """checkpointの内容から通常モデル・LoRA・不明を判定する。"""
+    if not isinstance(checkpoint, dict):
+        return "unknown"
+    metadata = checkpoint.get("metadata")
+    if (
+        isinstance(metadata, dict)
+        and metadata.get("format") == LORA_FORMAT
+        and isinstance(checkpoint.get("lora"), dict)
+    ):
+        return "lora"
+    if isinstance(checkpoint.get("net"), dict):
+        return "model"
+    return "unknown"
 
 
 def inject_lora(
@@ -106,4 +123,5 @@ def merge_lora_modules(model: nn.Module, scale: float = 1.0) -> int:
 
 def checkpoint_step(path: str) -> int:
     """LoRA中間checkpoint名からstep番号を取得する。"""
-    return int(Path(path).stem.rsplit("_step_", 1)[1])
+    step_text = Path(path).name.rsplit("_step_", 1)[1]
+    return int(step_text.split(".", 1)[0])
